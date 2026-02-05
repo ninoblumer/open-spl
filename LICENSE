@@ -1,6 +1,11 @@
 BSD 3-Clause License
 
-Copyright (c) 2026, ninoblumer
+Portions of this software are derived from "acoustic-toolbox" 
+https://github.com/Universite-Gustave-Eiffel/acoustic-toolbox
+Copyright (c) 2022–2024, Université Gustave Eiffel 
+All rights reserved.
+
+Copyright (c) 2026, Nino Blumer
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
