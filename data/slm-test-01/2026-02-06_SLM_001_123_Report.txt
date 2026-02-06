@@ -1,0 +1,28 @@
+XL2 Sound Level Meter Broadband Reporting:		slm-test-01\2026-02-06_SLM_001_123_Report.txt
+------------------------------------------
+
+
+# Hardware Configuration
+	Device Info:    	XL2, SNo. A2A-11831-E4, FW4.71 Type Approved
+	Mic Sensitivity:	50.1 mV/Pa
+	                	(User calibrated 2026-02-06  10:35)
+	Time Zone:      	UTC+01:00
+
+# Measurement Setup
+	Profile:        	Full mode
+	Append mode:    	OFF
+	Timer mode:     	single
+	Timer set:      	00:00:30
+	k1:             	0.0 dB
+	k2:             	0.0 dB
+	kset Date:      	k-Values not measured
+	Range:          	20 - 120 dB
+
+# Broadband Results
+	Start       	          	Stop        	          
+	Date        	Time      	Date        	Time      	LASmax  	LASmin  	LAFmax  	LAFmin  	LAImax  	LAImin  	LAeq    	Prev_LAeq	LAeq5"  	LAeq5"max	LAeq10' 	LAeq10'max	LAeq15' 	LAeq15'max	LAeq60' 	LAeq60'max	LAIeq   	LAE     	LAPKmax 	LAFT3eq 	LAFT5eq 	LCSmax  	LCSmin  	LCFmax  	LCFmin  	LCImax  	LCImin  	LCeq    	Prev_LCeq	LCeq5"  	LCeq5"max	LCeq10' 	LCeq10'max	LCeq15' 	LCeq15'max	LCeq60' 	LCeq60'max	LCIeq   	LCE     	LCPKmax 	LZSmax  	LZSmin  	LZFmax  	LZFmin  	LZImax  	LZImin  	LZeq    	Prev_LZeq	LZIeq   	LZE     	LZPKmax 	LAFT5eq-LAeq	LAIeq-LAeq	LCeq-LAeq	LAF1.0% 	LAF5.0% 	LAF10.0%	LAF50.0%	LAF90.0%	LAF95.0%	LAF99.0%	ImpPen_max	Low(eq/peak)	Overload
+	[YYYY-MM-DD]	[hh:mm:ss]	[YYYY-MM-DD]	[hh:mm:ss]	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]     	[dB]    	[dB]     	[dB]    	[dB]      	[dB]    	[dB]      	[dB]    	[dB]      	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]     	[dB]    	[dB]     	[dB]    	[dB]      	[dB]    	[dB]      	[dB]    	[dB]      	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]     	[dB]    	[dB]    	[dB]    	[dB]        	[dB]      	[dB]     	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]      	            	        
+	2026-02-06  	11:19:44  	2026-02-06  	11:20:14  	94.8    	22.1    	95.3    	22.0    	95.3    	22.2    	91.0    	-.-      	93.7    	93.7     	91.0    	-.-       	91.0    	-.-       	91.0    	-.-       	92.2    	105.8   	98.3    	93.5    	93.4    	94.0    	35.2    	94.0    	21.7    	94.1    	37.4    	92.8    	-.-      	92.9    	93.9     	92.8    	-.-       	92.8    	-.-       	92.8    	-.-       	93.3    	107.6   	97.1    	94.1    	37.0    	94.3    	24.9    	94.4    	39.2    	93.9    	-.-      	94.0    	108.7   	97.3    	2.4         	1.1       	1.7      	95.2    	95.1    	95.0    	89.0    	60.3    	56.0    	23.6    	3.7       	---/---     	        
+
+#CheckSum
+	429DF6E07A582562306E4C8F1E8FD95D
