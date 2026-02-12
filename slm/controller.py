@@ -4,7 +4,6 @@ import itertools
 import numpy as np
 
 
-
 class Controller(ABC):
 
     def __init__(self):
@@ -19,12 +18,15 @@ class Controller(ABC):
     @abstractmethod
     def blocksize(self) -> int: ...
 
+    @property
+    @abstractmethod
+    def sensitivity(self) -> float: ...
+
     @abstractmethod
     def read_block(self) -> tuple[np.ndarray, int]:
         """ read a block of audio and returns the data and the block_index """
         ...
 
-
-
-
-
+    @abstractmethod
+    def calibrate(self, target_spl=94.0):
+        ...
