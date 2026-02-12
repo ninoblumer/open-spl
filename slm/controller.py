@@ -5,7 +5,6 @@ import numpy as np
 
 
 class Controller(ABC):
-
     def __init__(self):
         super().__init__()
         self._counter = itertools.count(0)
@@ -24,7 +23,7 @@ class Controller(ABC):
 
     @abstractmethod
     def read_block(self) -> tuple[np.ndarray, int]:
-        """ read a block of audio and returns the data and the block_index """
+        """ read a block of audio and returns the buffer and the block_index """
         ...
 
     @abstractmethod
