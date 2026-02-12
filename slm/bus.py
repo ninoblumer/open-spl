@@ -1,12 +1,20 @@
-from plugin import Plugin, ID
+from slm.plugins.base import Plugin
+from slm.engine import Engine
+
 import itertools
+
 
 class Bus:
     name: str
     root: Plugin | None
     plugins: set[Plugin]
 
-    def __init__(self, name: str, root_type: type[Plugin] | None = None):
+    samplerate: int = property(lambda self: self.engine.samplerate)
+    blocksize: int = property(lambda self: self.engine.blocksize)
+    sensitivity: float = property(lambda self: self.engine.sensitivity)
+
+    def __init__(self, engine: Engine, name: str, root_type: type[Plugin] | None = None):
+        self.engine = engine
         self.name = name
         self.plugins = set()
         self._counter = itertools.count(1)  # for numbering plugins with unique id

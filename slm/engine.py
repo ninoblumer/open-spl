@@ -1,15 +1,15 @@
 from __future__ import annotations
-from typing import Optional
-
 
 import numpy as np
 
-from plugin import Plugin, ID, find_plugin
-from bus import Bus
-from controller import Controller
+from slm.plugins.base import Plugin, ID, find_plugin
+from slm.bus import Bus
+from slm.controller import Controller
+
 
 class RequestRejected(Exception):
     pass
+
 
 class ExecutionError(Exception):
     pass
@@ -37,6 +37,9 @@ class ExecutionContext:
 class Engine:
     max_ctx: int = 10
 
+    samplerate: int = property(lambda self: self._controller.samplerate)
+    blocksize: int = property(lambda self: self._controller.blocksize)
+    sensitivity: float = property(lambda self: self._controller.sensitivity)
 
     def __init__(self, controller):
         self._controller: Controller = controller
@@ -44,9 +47,8 @@ class Engine:
         self._supported_functions: list[tuple[str]] = []
         self._ctxs: list[ExecutionContext] = []
 
-
-    def add_bus(self, name: str, root_type: type[Plugin]|None) -> Bus:
-        bus = Bus(name=name, root_type=root_type)
+    def add_bus(self, name: str, root_type: type[Plugin] | None) -> Bus:
+        bus = Bus(engine=self, name=name, root_type=root_type)
         self._busses[name] = bus
         return bus
 
@@ -65,7 +67,6 @@ class Engine:
 
         return self._busses[bus].add_plugin(ptype, source)
 
-
     def require(self, requirement: tuple[str]):
         if requirement in self._supported_functions:
             return
@@ -78,11 +79,11 @@ class Engine:
 
         last = bus.root
         for i, req in enumerate(requirement[1:], start=1):
-            for plugin in bus.plugins: # TODO: optimise by only searching through the outputs of the last plugin
+            for plugin in bus.plugins:  # TODO: optimise by only searching through the outputs of the last plugin
                 if plugin.input == last and plugin.function == req:
                     last = plugin
                     break
-            else: # loop finished with no break -> no matching plugin found
+            else:  # loop finished with no break -> no matching plugin found
                 satisfied = False
                 break
         else:
@@ -98,8 +99,6 @@ class Engine:
                 last = self.add_plugin(PType, bus.name, source=last)
 
         self._supported_functions.append(requirement)
-
-
 
     def run(self):
         while True:
@@ -134,16 +133,3 @@ class Engine:
         # discard old contexts
         while len(self._ctxs) > self.max_ctx:
             self._ctxs.pop(0)
-
-
-
-
-
-
-
-
-
-
-
-
-
