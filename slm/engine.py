@@ -2,41 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from slm.plugins.base import Plugin, ID, find_plugin
+from slm.plugins.frequency_weighting import PluginFrequencyWeighting
+from slm.plugins.plugin import Plugin
 from slm.bus import Bus
 from slm.controller import Controller
-
-
-class RequestRejected(Exception):
-    pass
-
-
-class ExecutionError(Exception):
-    pass
-
-
-class ExecutionContext:
-    samplerate: int
-    blocksize: int
-    block_index: int
-    block: np.ndarray
-    cache: dict[ID, np.ndarray]
-
-    @property
-    def timestamp(self) -> float:
-        """seconds passed since the beginning of the execution until the start of the block"""
-        return self.block_index * self.blocksize / self.samplerate
-
-    def __init__(self, samplerate, blocksize, block_index):
-        self.samplerate = samplerate
-        self.blocksize = blocksize
-        self.block_index = block_index
-        self.cache = dict()
-
+from slm.plugins.time_weighting import PluginTimeWeighting
+from slm.exceptions import ExecutionError, RequestRejected
 
 class Engine:
-    max_ctx: int = 10
-
     samplerate: int = property(lambda self: self._controller.samplerate)
     blocksize: int = property(lambda self: self._controller.blocksize)
     sensitivity: float = property(lambda self: self._controller.sensitivity)
@@ -45,10 +18,9 @@ class Engine:
         self._controller: Controller = controller
         self._busses: dict[str, Bus] = dict()
         self._supported_functions: list[tuple[str]] = []
-        self._ctxs: list[ExecutionContext] = []
 
-    def add_bus(self, name: str, root_type: type[Plugin] | None) -> Bus:
-        bus = Bus(engine=self, name=name, root_type=root_type)
+    def add_bus(self, name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None) -> Bus:
+        bus = Bus(engine=self, name=name, frequency_weighting=frequency_weighting)
         self._busses[name] = bus
         return bus
 
@@ -61,44 +33,54 @@ class Engine:
         except KeyError:
             raise KeyError(f"No bus named '{name}'")
 
-    def add_plugin(self, ptype: type[Plugin], bus: str, source: Plugin | None) -> Plugin:
+    def add_plugin(self, ptype: type[Plugin], bus: str, input: Plugin, **kwargs) -> Plugin:
         if bus not in self._busses:
             raise Exception(f"Unknown bus {bus}")
 
-        return self._busses[bus].add_plugin(ptype, source)
+        return self._busses[bus].add_plugin(ptype, input, **kwargs)
 
-    def require(self, requirement: tuple[str]):
-        if requirement in self._supported_functions:
-            return
+    # def require(self, requirement: tuple[str]):
+    #     if requirement in self._supported_functions:
+    #         return
+    #
+    #     # select bus with weighting
+    #     try:
+    #         bus = self.get_bus(requirement[0])
+    #     except KeyError:
+    #         bus = self.add_bus(requirement[0], find_plugin(requirement[0]))
+    #
+    #     last_plugin = bus.frequency_weighting
+    #     last_requirement = 1
+    #     for i, req in enumerate(requirement[1:], start=1):
+    #         for plugin in bus.plugins:
+    #             if plugin.input == last_plugin and plugin.function == req:
+    #                 last_plugin = plugin
+    #                 break
+    #         else:  # loop finished with no break -> no matching plugin found
+    #             satisfied = False
+    #             last_requirement = i
+    #             break
+    #     else:
+    #         # loop finished with no break -> all requirements were satisfied
+    #         satisfied = True
+    #
+    #     if not satisfied:
+    #         # requirement req at index i is not satisfied
+    #         for j in range(last_requirement, len(requirement)):
+    #             req = requirement[j]
+    #             # resolve Plugin
+    #             PType = find_plugin(req)
+    #             last_plugin = self.add_plugin(PType, bus.name, input=last_plugin)
+    #
+    #     self._supported_functions.append(requirement)
 
-        # select bus with weighting
-        try:
-            bus = self.get_bus(requirement[0])
-        except KeyError:
-            bus = self.add_bus(requirement[0], find_plugin(requirement[0]))
+    # def require(self, frequency_weighting: tuple[type[PluginFrequencyWeighting],  | None = None, time_reduction: type[PluginMeter] | None = None) -> None:
+    #     if time_reduction is None:
+    #         raise RequestRejected(f"Time-reduction must be specified")
 
-        last = bus.root
-        for i, req in enumerate(requirement[1:], start=1):
-            for plugin in bus.plugins:  # TODO: optimise by only searching through the outputs of the last plugin
-                if plugin.input == last and plugin.function == req:
-                    last = plugin
-                    break
-            else:  # loop finished with no break -> no matching plugin found
-                satisfied = False
-                break
-        else:
-            # loop finished with no break -> all requirements were satisfied
-            satisfied = True
+    def require(self, *args, **kwargs):
+        raise NotImplementedError()
 
-        if not satisfied:
-            # requirement req at index i is not satisfied
-            for j in range(i, len(requirement)):
-                req = requirement[j]
-                # resolve Plugin
-                PType = find_plugin(req)
-                last = self.add_plugin(PType, bus.name, source=last)
-
-        self._supported_functions.append(requirement)
 
     def run(self):
         while True:
@@ -116,20 +98,12 @@ class Engine:
         if block is None:
             raise StopIteration
 
-        self._ctxs.append(
-            ExecutionContext(blocksize=self._controller.blocksize,
-                             samplerate=self._controller.samplerate,
-                             block_index=block_index)
-        )
-        ctx = self._ctxs[-1]
-
         for bus in self._busses.values():
-            for plugin in bus.plugins:
-                plugin.process(ctx)
+            bus.process(block)
 
         # hook for logging
-        # TODO
+        for bus in self._busses.values():
+            # todo use yield ore so
+            bus.log_block()
 
-        # discard old contexts
-        while len(self._ctxs) > self.max_ctx:
-            self._ctxs.pop(0)
+

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -5,37 +6,49 @@ import numpy as np
 from scipy.signal import lfilter, lfilter_zi
 from numba import jit
 
-from slm.plugins.base import PluginMeter
+from slm.plugins.plugin import PluginMeter, ReadMode
 
 
-class PluginABCTimeWeighting(PluginMeter, ABC):
-    class ReadModes(Enum):
-        max = "max"
-        min = "min"
-        last = "last"
+class PluginTimeWeighting(PluginMeter, ABC):
+    time_constant: str
+    # ReadModes = Enum("ReadModes", [
+    #     ("last", lambda a: a[:,-1]),
+    #     ("max", np.max),
+    #     ("min", np.min)
+    # ])
 
-    _read_mode: ReadModes
-    read_mode: ReadModes = property(lambda self: self._read_mode)
+    # class ReadModes(Enum):
+    #     last = lambda a: a[:,-1]
+    #     max = np.max
+    #     min = np.min
 
-    def __init__(self, read_mode: ReadModes = ReadModes.last, zero_zi: bool = False, **kwargs):
+    def __init__(self,
+                 #read_mode: Enum = ReadModes.last,
+                 read_mode: ReadMode = ReadMode("last", lambda a: a[:,-1]),
+                 zero_zi: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._read_mode = read_mode
         self._zero_zi = zero_zi
+        self.output = np.zeros((self.input.output.shape[0], 1))
 
     @abstractmethod
     def _compute_filter(self) -> None: ...
 
     def reset(self):
+        super().reset()
         self._compute_filter()
 
+    def to_str(self):
+        return f"{type(self).__name__}({self.time_constant}, {self.read_mode.name})"
 
-class PluginTimeWeighting(PluginABCTimeWeighting):
+
+class PluginSymmetricTimeWeighting(PluginTimeWeighting):
     tau: float
-    time_constant: str
-    function = property(lambda self: f"{self.time_constant}-time-weighting")
+    # function = property(lambda self: f"{self.time_constant}-time-weighting")
 
     def __init__(self, *, time_constant: str, tau: float, **kwargs):
         super().__init__(**kwargs)
+        self._zi = None
         self.time_constant = time_constant
         self.tau = tau
         self._compute_filter()
@@ -44,20 +57,26 @@ class PluginTimeWeighting(PluginABCTimeWeighting):
         alpha = 1 - np.exp(-1 / (self.samplerate * self.tau))
         self._b = [alpha]
         self._a = [1, -(1 - alpha)]
-        self._zi = lfilter_zi(self._b, self._a)
+        zi = lfilter_zi(self._b, self._a)
+        Nbands = self.input.output.shape[0]
+        self._zi = np.tile(zi, (Nbands, 1))
+
         if self._zero_zi:
-            self._zi = np.zeros_like(self._zi)
+            self._zi.fill(0)
 
-    def func(self, block: np.ndarray) -> np.ndarray:
-        x_sq = np.square(block)
-        result, self._zi = lfilter(self._b, self._a, x_sq, axis=-1, zi=self._zi)
-        return result[-1:] # only return reading at end of block. time weighting is rate reduction
+    def process(self):
+        result, self._zi[:,:] = lfilter(self._b, self._a,
+                                        np.square(self.input.get()),
+                                        axis=-1, zi=self._zi)
+        self.output[:,0] = self.read_mode.value(result)
+
+    def read_lin(self):
+        return self.output[:,0] / self.tau
 
 
-class PluginAsymmetricTimeWeighting(PluginABCTimeWeighting):
+class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
     tau: tuple[float, float]
-    time_constant: str
-    function = property(lambda self: f"{self.time_constant}-time-weighting")
+    # function = property(lambda self: f"{self.time_constant}-time-weighting")
 
     def __init__(self, *, time_constant: str, tau: tuple[float, float], **kwargs):
         super().__init__(**kwargs)
@@ -70,18 +89,19 @@ class PluginAsymmetricTimeWeighting(PluginABCTimeWeighting):
         self._alpha_fall = 1 - np.exp(-1 / (self.samplerate * self.tau[1]))
         self._zi = np.zeros((1,1))
 
-    def func(self, block: np.ndarray) -> np.ndarray:
-        x_sq = np.square(block)
-        result, self.zi = asymmetric_time_weighting(x_sq, zi=self._zi,
-                                                    alpha=self._alpha_rise, alpha_fall=self._alpha_fall)
-        return result[-1:] # only return reading at end of block. time weighting is rate reduction
+    def process(self):
+        result, self._zi[:,:] = asymmetric_time_weighting(np.square(self.input.get()),
+                                                     zi=self._zi,
+                                                     alpha_rise=self._alpha_rise, alpha_fall=self._alpha_fall
+                                                     )
+        self.output[:,0] = self.read_mode.value(result)
 
 
-class PluginFastTimeWeighting(PluginTimeWeighting):
+class PluginFastTimeWeighting(PluginSymmetricTimeWeighting):
     def __init__(self, **kwargs):
         super().__init__(time_constant="fast", tau=0.125, **kwargs)
 
-class PluginSlowTimeWeighting(PluginTimeWeighting):
+class PluginSlowTimeWeighting(PluginSymmetricTimeWeighting):
     def __init__(self, **kwargs):
         super().__init__(time_constant="slow", tau=1.0, **kwargs)
 
@@ -91,7 +111,7 @@ class PluginImpulseTimeWeighting(PluginAsymmetricTimeWeighting):
 
 
 @jit(nopython=True)
-def asymmetric_time_weighting(x, zi, alpha_rise, alpha_fall):
+def asymmetric_time_weighting(x, *, zi, alpha_rise, alpha_fall):
     """
     Process one block with IEC 61672-1 Impulse time weighting.
 
