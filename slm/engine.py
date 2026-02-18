@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from slm.plugins.frequency_weighting import PluginFrequencyWeighting
-from slm.plugins.plugin import Plugin
+from slm.plugins.plugin import Plugin, PluginMeter, Meter
 from slm.bus import Bus
 from slm.controller import Controller
 from slm.plugins.time_weighting import PluginTimeWeighting
@@ -13,11 +13,13 @@ class Engine:
     samplerate: int = property(lambda self: self._controller.samplerate)
     blocksize: int = property(lambda self: self._controller.blocksize)
     sensitivity: float = property(lambda self: self._controller.sensitivity)
+    dt: float = property(lambda self: self._dt)
 
-    def __init__(self, controller):
+    def __init__(self, controller, dt: float=0.1):
         self._controller: Controller = controller
         self._busses: dict[str, Bus] = dict()
         self._supported_functions: list[tuple[str]] = []
+        self._dt = dt
 
     def add_bus(self, name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None) -> Bus:
         bus = Bus(engine=self, name=name, frequency_weighting=frequency_weighting)
@@ -33,11 +35,19 @@ class Engine:
         except KeyError:
             raise KeyError(f"No bus named '{name}'")
 
-    def add_plugin(self, ptype: type[Plugin], bus: str, input: Plugin, **kwargs) -> Plugin:
+    def add_plugin(self, ptype: type[Plugin], bus: str, **kwargs) -> Plugin:
         if bus not in self._busses:
             raise Exception(f"Unknown bus {bus}")
 
-        return self._busses[bus].add_plugin(ptype, input, **kwargs)
+        return self._busses[bus].add_plugin(ptype, **kwargs)
+
+    def add_meter(self, plugin: PluginMeter, **kwargs) -> Meter:
+        bus = plugin.bus
+        if bus not in self._busses.values():
+            raise Exception(f"Unknown bus {bus.name}")
+
+        return bus.add_meter(input=plugin, **kwargs)
+
 
     # def require(self, requirement: tuple[str]):
     #     if requirement in self._supported_functions:
@@ -94,6 +104,7 @@ class Engine:
 
     def _process_block(self) -> None:
         block, block_index = self._controller.read_block()
+        block = block.transpose()
 
         if block is None:
             raise StopIteration
@@ -104,6 +115,9 @@ class Engine:
         # hook for logging
         for bus in self._busses.values():
             # todo use yield ore so
-            bus.log_block()
+            bus.log_block(block_index)
+
+    def stop(self):
+        self._controller.stop()
 
 

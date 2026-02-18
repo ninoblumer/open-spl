@@ -6,7 +6,7 @@ import numpy as np
 from scipy.signal import lfilter, lfilter_zi
 from numba import jit
 
-from slm.plugins.plugin import PluginMeter, ReadMode
+from slm.plugins.plugin import Plugin, PluginMeter, ReadMode
 
 
 class PluginTimeWeighting(PluginMeter, ABC):
@@ -22,14 +22,10 @@ class PluginTimeWeighting(PluginMeter, ABC):
     #     max = np.max
     #     min = np.min
 
-    def __init__(self,
-                 #read_mode: Enum = ReadModes.last,
-                 read_mode: ReadMode = ReadMode("last", lambda a: a[:,-1]),
-                 zero_zi: bool = False, **kwargs):
+    def __init__(self, zero_zi: bool = True, **kwargs):
         super().__init__(**kwargs)
-        self._read_mode = read_mode
         self._zero_zi = zero_zi
-        self.output = np.zeros((self.input.output.shape[0], 1))
+        self.output = np.zeros((self.width, self.blocksize))
 
     @abstractmethod
     def _compute_filter(self) -> None: ...
@@ -39,7 +35,7 @@ class PluginTimeWeighting(PluginMeter, ABC):
         self._compute_filter()
 
     def to_str(self):
-        return f"{type(self).__name__}({self.time_constant}, {self.read_mode.name})"
+        return f"{type(self).__name__}({self.time_constant})"
 
 
 class PluginSymmetricTimeWeighting(PluginTimeWeighting):
@@ -54,24 +50,19 @@ class PluginSymmetricTimeWeighting(PluginTimeWeighting):
         self._compute_filter()
 
     def _compute_filter(self):
-        alpha = 1 - np.exp(-1 / (self.samplerate * self.tau))
+        alpha = 1 - np.exp(-1 / (self.tau*self.samplerate))
         self._b = [alpha]
         self._a = [1, -(1 - alpha)]
         zi = lfilter_zi(self._b, self._a)
-        Nbands = self.input.output.shape[0]
-        self._zi = np.tile(zi, (Nbands, 1))
+        self._zi = np.tile(zi, (self.width, 1))
 
         if self._zero_zi:
             self._zi.fill(0)
 
-    def process(self):
-        result, self._zi[:,:] = lfilter(self._b, self._a,
-                                        np.square(self.input.get()),
+    def func(self, block: np.ndarray):
+        self.output[:,:], self._zi[:,:] = lfilter(self._b, self._a,
+                                        np.square(block),
                                         axis=-1, zi=self._zi)
-        self.output[:,0] = self.read_mode.value(result)
-
-    def read_lin(self):
-        return self.output[:,0] / self.tau
 
 
 class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
@@ -89,12 +80,11 @@ class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
         self._alpha_fall = 1 - np.exp(-1 / (self.samplerate * self.tau[1]))
         self._zi = np.zeros((1,1))
 
-    def process(self):
-        result, self._zi[:,:] = asymmetric_time_weighting(np.square(self.input.get()),
+    def func(self, block: np.ndarray):
+        self.output[:,:], self._zi[:,:] = asymmetric_time_weighting(np.square(block),
                                                      zi=self._zi,
                                                      alpha_rise=self._alpha_rise, alpha_fall=self._alpha_fall
                                                      )
-        self.output[:,0] = self.read_mode.value(result)
 
 
 class PluginFastTimeWeighting(PluginSymmetricTimeWeighting):
