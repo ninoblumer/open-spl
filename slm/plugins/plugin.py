@@ -76,10 +76,14 @@ class Plugin(ABC):
 
 TPlugin = TypeVar("TPlugin", bound=Plugin)
 
+
+# TODO: remove
 class ReadMode(NamedTuple):
     name: str
     value: Callable
 
+# This works well for moving averages, but:
+# TODO: need a Meter for global max, min, mean... (so up to "now" (logging) or over the whole recording (reporting)
 class Meter:
     name: str
     block_fn: Callable

@@ -33,6 +33,7 @@ class Bus:
         self.meters = []
         self._counter = itertools.count(1)  # for numbering plugins with unique id
         self.block = np.zeros((1, self.blocksize))
+        self._last_log = timedelta(seconds=0)
 
         if frequency_weighting is None:
             frequency_weighting = PluginZWeighting
@@ -57,15 +58,25 @@ class Bus:
 
     def log_block(self, block_index: int):
         timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
-        for plugin in self.plugins:
-            if isinstance(plugin, PluginMeter):
-                for name, meter in plugin.meters.items():
-                    reading = plugin.read_db(name)
-                    if len(reading) == 1:
-                        reading = reading[0]
-                    else:
-                        reading = list(reading)
-                    print(f"{timestamp} {meter}: {reading:.1f} dB")
+
+        # delta = timestamp - self._last_log
+        # dt = delta.total_seconds()
+        # if dt > self.dt:
+        #     self._last_log = timestamp
+        # else:
+        #     return
+
+        if timestamp - self._last_log >= timedelta(seconds=self.dt):
+            self._last_log += timedelta(seconds=self.dt)
+            for plugin in self.plugins:
+                if isinstance(plugin, PluginMeter):
+                    for name, meter in plugin.meters.items():
+                        reading = plugin.read_db(name)
+                        if len(reading) == 1:
+                            reading = reading[0]
+                        else:
+                            reading = list(reading)
+                        print(f"{timestamp} {meter}: {reading:.1f} dB")
 
     def get_chain(self) -> list[Plugin | Bus | Meter]:
         return [self]
