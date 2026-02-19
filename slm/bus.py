@@ -20,7 +20,7 @@ class Bus(ProcessingElement):
     name: str
     frequency_weighting: PluginFrequencyWeighting
     plugins: list[Plugin]
-    meters: list[Meter]
+    # meters: list[Meter] # meters are handled by plugins
     block: np.ndarray
     engine: "Engine"
     dt: float = property(lambda self: self.engine.dt)
@@ -35,14 +35,14 @@ class Bus(ProcessingElement):
         self.name = name
         self.plugins = []
         self.meters = []
-        self._counter = itertools.count(1)  # for numbering plugins with unique id
+        # self._counter = itertools.count(1)  # for numbering plugins with unique id
         self.block = np.zeros((1, self.blocksize))
         self._last_log = timedelta(seconds=0)
 
         if frequency_weighting is None:
             frequency_weighting = PluginZWeighting
 
-        self.frequency_weighting = self.add_plugin(frequency_weighting, width=1, input=self, zero_zi=True)
+        self.frequency_weighting = self.add_plugin(frequency_weighting(width=1, input=self, bus=self, zero_zi=True))
 
     def process(self, block: np.ndarray):
         self.frequency_weighting.process(block)
@@ -50,15 +50,26 @@ class Bus(ProcessingElement):
     def get(self) -> np.ndarray:
         return self.block
 
-    def add_plugin(self, ptype: type[TPlugin], **kwargs) -> TPlugin:
+    def create_plugin(self, ptype: type[TPlugin], **kwargs) -> TPlugin:
         plugin = ptype(id=f"{self.name}{next(self._counter)}", bus=self, **kwargs)
+        return self.add_plugin(plugin)
+
+    def add_plugin(self, plugin: TPlugin) -> TPlugin:
+        if plugin.bus != self:
+            raise Exception(f"Plugin {plugin.bus} does not belong to {self}")
         self.plugins.append(plugin)
         return plugin
 
-    def add_meter(self, plugin: PluginMeter, mtype: type[TMeter], **kwargs) -> TMeter:
-        meter = plugin.add_meter(mtype, **kwargs)
-        self.meters.append(meter)
-        return meter
+
+    # Meters are handled by Plugins
+    # def create_meter(self, plugin: PluginMeter, mtype: type[TMeter], **kwargs) -> TMeter:
+    #     meter = plugin.create_meter(mtype, **kwargs)
+    #     return self.add_meter(meter)
+    #
+    # def add_meter(self, meter: TMeter) -> TMeter:
+    #     self.meters.append(meter)
+    #     return meter
+
 
     def log_block(self, block_index: int):
         timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
@@ -77,10 +88,10 @@ class Bus(ProcessingElement):
                     for name, meter in plugin.meters.items():
                         reading = plugin.read_db(name)
                         if len(reading) == 1:
-                            reading = reading[0]
+                            print(f"{timestamp} {meter}: {reading[0]:.1f} dB")
                         else:
-                            reading = list(reading)
-                        print(f"{timestamp} {meter}: {reading:.1f} dB")
+                            print(f"{timestamp} {meter}: [{", ".join([f"{x:.1f}" for x in reading])}] dB")
+
 
     def get_chain(self) -> list[ProcessingElement]:
         return [self]

@@ -23,7 +23,7 @@ class FileController(Controller):
     _done: bool
 
 
-    def __init__(self, filename: str | Path, blocksize: int, overlap: int = 0, **kwargs):
+    def __init__(self, filename: str | Path, blocksize: int=256, overlap: int = 0, **kwargs):
         super().__init__(**kwargs)
         self._sf = None
         self.open(filename, blocksize=blocksize, overlap=overlap)

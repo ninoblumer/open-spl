@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 #     )
 
 class Plugin(ProcessingElement, ABC):
-    id: str
+    # id: str
     bus: "Bus"
     input: "Plugin | Bus"
     output: np.ndarray
@@ -29,10 +29,15 @@ class Plugin(ProcessingElement, ABC):
     blocksize: int = property(lambda self: self.bus.blocksize)
     sensitivity: float = property(lambda self: self.bus.sensitivity)
 
-    def __init__(self, *, bus: "Bus", id: str, input: "Plugin | Bus", width: int = 1, **kwargs):
+    def __init__(self, *, input: "Plugin | Bus", width: int = 1, **kwargs):
         super().__init__(**kwargs)
-        self.bus = bus
-        self.id = id
+
+        from slm.bus import Bus
+        if isinstance(input, Bus):
+            self.bus = input
+        else:
+            self.bus = input.bus
+
         self.input = input
         self._width = width
         self.subscribers = []

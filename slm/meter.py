@@ -54,7 +54,7 @@ class MovingMeter(Meter):
 
     @staticmethod
     def _block_fn_last(a: np.ndarray) -> np.ndarray:
-        return a[:, -1]
+        return a[-1]
 
     @staticmethod
     def _fifo_fn_last(a: np.ndarray) -> np.ndarray:
@@ -78,9 +78,10 @@ class MovingMeter(Meter):
 
 
     def process(self, block: np.ndarray):
-        self._fifo.push(self.block_fn(block))
+        # self._fifo.push(self.block_fn(block))
         # result = self.block_fn(block)
-        # self._fifo.push(result)
+        result = np.apply_along_axis(self.block_fn, axis=1, arr=block)
+        self._fifo.push(result)
 
     def read(self) -> np.ndarray:
         return self._fifo.map(self.fifo_fn)
@@ -98,14 +99,17 @@ class AccumulatingMeter(Meter):
         super().__init__(**kwargs)
         self.block_fn = block_fn
         self.comp_fn = comp_fn
-        self._acc = np.zeros((self.width, 1))
+        self._acc = np.zeros((self.width,))
 
     def to_str(self):
         return f"AccumulatingMeter(name={self.name}, block_fn={self.block_fn}, comp_fn={self.comp_fn})"
 
     def process(self, block: np.ndarray):
-        metric = self.block_fn(block)
-        self._acc = self.comp_fn(metric, self._acc)
+        # metric = self.block_fn(block)
+        metric = np.apply_along_axis(self.block_fn, axis=1, arr=block)
+        stack = np.stack((metric, self._acc), axis=1)
+        result = np.apply_along_axis(self.comp_fn, axis=1, arr=stack)
+        self._acc = result
 
     def read(self) -> np.ndarray:
         return self._acc

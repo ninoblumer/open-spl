@@ -16,8 +16,13 @@ class PluginMeter(Plugin, ABC):
         super().__init__(**kwargs)
         self.meters = {}
 
-    def add_meter(self, mtype:type[TMeter], **kwargs) -> TMeter:
+    def create_meter(self, mtype:type[TMeter], **kwargs) -> TMeter:
         meter = mtype(parent=self, **kwargs)
+        return self.add_meter(meter)
+
+    def add_meter(self, meter: TMeter) -> TMeter:
+        if meter.parent != self:
+            raise Exception(f"Meter {meter} does not belong to {self}")
         self.meters[meter.name] = meter
         return meter
 
