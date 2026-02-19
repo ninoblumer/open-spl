@@ -1,13 +1,14 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
-import numpy as np
-
-from slm.plugins.frequency_weighting import PluginFrequencyWeighting
-from slm.plugins.plugin import Plugin, PluginMeter, Meter
 from slm.bus import Bus
-from slm.controller import Controller
-from slm.plugins.time_weighting import PluginTimeWeighting
-from slm.exceptions import ExecutionError, RequestRejected
+
+if TYPE_CHECKING:
+    from slm.frequency_weighting import PluginFrequencyWeighting
+    from slm.plugin import Plugin
+    from slm.controller import Controller
+    from slm.plugin import Plugin
+
 
 class Engine:
     samplerate: int = property(lambda self: self._controller.samplerate)

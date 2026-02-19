@@ -5,15 +5,18 @@ from datetime import timedelta
 
 import numpy as np
 
-from slm.plugins.plugin import Plugin, TPlugin, PluginMeter, Meter
-from slm.plugins.frequency_weighting import PluginFrequencyWeighting, PluginZWeighting
+from slm.processing_element import ProcessingElement
+from slm.frequency_weighting import PluginFrequencyWeighting, PluginZWeighting
+from slm.plugin_meter import PluginMeter
 
 if TYPE_CHECKING:
-    from slm.engine import Engine
+    from slm.plugin import Plugin, TPlugin
+    from slm.meter import Meter, TMeter
 
 
 
-class Bus:
+
+class Bus(ProcessingElement):
     name: str
     frequency_weighting: PluginFrequencyWeighting
     plugins: list[Plugin]
@@ -26,7 +29,8 @@ class Bus:
     blocksize: int = property(lambda self: self.engine.blocksize)
     sensitivity: float = property(lambda self: self.engine.sensitivity)
 
-    def __init__(self, engine: "Engine", name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None):
+    def __init__(self, engine: "Engine", name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None, **kwargs):
+        super().__init__(**kwargs)
         self.engine = engine
         self.name = name
         self.plugins = []
@@ -51,8 +55,8 @@ class Bus:
         self.plugins.append(plugin)
         return plugin
 
-    def add_meter(self, input: PluginMeter, **kwargs) -> Meter:
-        meter = input.add_meter(**kwargs)
+    def add_meter(self, plugin: PluginMeter, mtype: type[TMeter], **kwargs) -> TMeter:
+        meter = plugin.add_meter(mtype, **kwargs)
         self.meters.append(meter)
         return meter
 
@@ -78,7 +82,7 @@ class Bus:
                             reading = list(reading)
                         print(f"{timestamp} {meter}: {reading:.1f} dB")
 
-    def get_chain(self) -> list[Plugin | Bus | Meter]:
+    def get_chain(self) -> list[ProcessingElement]:
         return [self]
 
     def to_str(self):

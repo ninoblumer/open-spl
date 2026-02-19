@@ -1,12 +1,11 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from enum import Enum
 
 import numpy as np
 from scipy.signal import lfilter, lfilter_zi
 from numba import jit
 
-from slm.plugins.plugin import Plugin, PluginMeter, ReadMode
+from slm.plugin_meter import PluginMeter
 
 
 class PluginTimeWeighting(PluginMeter, ABC):

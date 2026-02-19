@@ -24,7 +24,7 @@ class FIFO:
 
     def map(self, func):
         """
-        maps a func of the contents of the buffer.
+        maps a block_fn of the contents of the buffer.
         Warning: the buffer is unordered, so only use functions that are invariant to the ordering (like min, max or mean)
         """
         return np.apply_along_axis(func, 1, self.buffer)

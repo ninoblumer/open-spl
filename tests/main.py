@@ -1,4 +1,4 @@
-from slm.plugins.plugin import Meter
+from slm.meter import Meter, MovingMeter, AccumulatingMeter
 from util.xl2 import XL2_SLM_Measurement
 from pathlib import Path
 
@@ -34,15 +34,15 @@ def main():
 
     engine = Engine(controller=controller, dt=0.1)
 
-    from slm.plugins.frequency_weighting import PluginZWeighting, PluginAWeighting
+    from slm.frequency_weighting import PluginZWeighting, PluginAWeighting
     bus_z = engine.add_bus('Z', PluginZWeighting)
     bus_a = engine.add_bus('A', PluginAWeighting)
 
-    from slm.plugins.plugin import ReadMode
-    from slm.plugins.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
+    from slm.plugin import ReadMode
+    from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
 
     laf = bus_a.add_plugin(PluginFastTimeWeighting, input=bus_a.frequency_weighting, zero_zi=True)
-    laf_meter = bus_a.add_meter(name="=", input=laf, block_fn=Meter._block_fn_last, fifo_fn=Meter._fifo_fn_last)
+    laf_meter = bus_a.add_meter(name="=", plugin=laf, mtype=MovingMeter, block_fn=MovingMeter._block_fn_last, fifo_fn=MovingMeter._fifo_fn_last)
     laf_max = engine.add_plugin(PluginFastTimeWeighting, bus='A', input=bus_a.frequency_weighting, read_mode=ReadMode("max", np.max), zero_zi=True)
 
     las = bus_a.add_plugin(PluginSlowTimeWeighting, input=bus_a.frequency_weighting, zero_zi=True)
