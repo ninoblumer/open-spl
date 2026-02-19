@@ -3,11 +3,12 @@ import numpy as np
 from pyoctaveband import WeightingFilter
 from scipy.signal import sosfilt, sosfilt_zi
 
-from slm.plugins.plugin import Plugin
+from slm.plugin import Plugin
+from slm.plugin_meter import PluginMeter
 
 
 
-class PluginFrequencyWeighting(Plugin):
+class PluginFrequencyWeighting(PluginMeter):
     curve: str
     def __init__(self, *, curve: str, zero_zi: bool=True, **kwargs):
         super().__init__(**kwargs)

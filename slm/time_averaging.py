@@ -1,10 +1,9 @@
 from __future__ import annotations
-from enum import Enum
 
 import numpy as np
 
-from slm.plugins.plugin import PluginMeter, ReadMode
-from slm.plugins.fifo import FIFO
+from slm.plugin import PluginMeter, ReadMode
+
 
 class PluginTimeAveraging(PluginMeter):
     # ReadModes = Enum("ReadModes", [
