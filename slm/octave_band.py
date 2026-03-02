@@ -47,27 +47,27 @@ class PluginOctaveBand(PluginMeter):
     n_bands: int = property(lambda self: self._filter_bank.num_bands)
     center_frequencies: list[float] = property(lambda self: self._filter_bank.freq)
 
-    _filter_bank: StatefulOctaveFilterBank
+    _filter_bank: OctaveFilterBank
 
 
 
-    def __init__(self, limits: tuple[float, float], bands_per_oct: float = 1.0, order: int = 6, detrend: bool = True,
+    def __init__(self, limits: tuple[float, float], bands_per_oct: float = 1.0, order: int = 6,
                  filter_type: str = "butter", ripple: float=0.1, attenuation: float=60, zero_zi: bool = True, **kwargs):
         super().__init__(**kwargs)
         self._zero_zi = zero_zi
-        self._detrend = detrend
 
         if self.width != 1:
             raise ValueError("OctaveBandPlugin only supports inputs of width=1")
 
-        self._filter_bank = StatefulOctaveFilterBank(zero_zi=zero_zi, fs=self.samplerate, fraction=bands_per_oct,
-                                                     limits=list(limits), show=False,
-                                                     order=order, filter_type=filter_type, ripple=ripple, attenuation=attenuation)
+        self._filter_bank = OctaveFilterBank(fs=self.samplerate, fraction=bands_per_oct, limits=list(limits),
+                                             show=False, order=order, filter_type=filter_type,
+                                             ripple=ripple, attenuation=attenuation,
+                                             stateful=True, steady_ic=not zero_zi, resample=False)
 
         self.output = np.zeros((self.n_bands, self.blocksize))
 
     def func(self, block: np.ndarray):
-        spl_array, freqs, signals = self._filter_bank.filter(block, sigbands=True, detrend=self._detrend)
+        spl_array, _, signals = self._filter_bank.filter(block, sigbands=True, detrend=False)
         self.output[:, :] = np.vstack(signals)
 
     def to_str(self):
