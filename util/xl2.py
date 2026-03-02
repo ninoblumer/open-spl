@@ -117,7 +117,7 @@ class _SectionKeyValue(_Section):
             if token[0] == "":
                 if lastkey is None:
                     raise XL2ParseError("Malformed key-value section")
-                self.content[lastkey] = self.content[lastkey].append("\n" + token[1])
+                self.content[lastkey] += "\n" + token[1]
             else:
                 lastkey = token[0].rstrip(":")
                 self.content[lastkey] = token[2]

@@ -20,7 +20,7 @@ class FIFO:
         return np.concatenate((
             self.buffer[:, self.index:],
             self.buffer[:, :self.index]
-        ))
+        ), axis=1)
 
     def map(self, func):
         """
