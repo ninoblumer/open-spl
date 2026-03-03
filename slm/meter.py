@@ -111,6 +111,9 @@ class AccumulatingMeter(Meter):
         result = np.apply_along_axis(self.comp_fn, axis=1, arr=stack)
         self._acc = result
 
+    def reset(self):
+        self._acc = np.zeros((self.width,))
+
     def read(self) -> np.ndarray:
         return self._acc
 

@@ -77,13 +77,15 @@ class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
     def _compute_filter(self):
         self._alpha_rise = 1 - np.exp(-1 / (self.samplerate * self.tau[0]))
         self._alpha_fall = 1 - np.exp(-1 / (self.samplerate * self.tau[1]))
-        self._zi = np.zeros((1,1))
+        self._zi = np.zeros(self.width)
 
     def func(self, block: np.ndarray):
-        self.output[:,:], self._zi[:,:] = asymmetric_time_weighting(np.square(block),
-                                                     zi=self._zi,
-                                                     alpha_rise=self._alpha_rise, alpha_fall=self._alpha_fall
-                                                     )
+        x2 = np.square(block)
+        for ch in range(self.width):
+            self.output[ch], self._zi[ch] = asymmetric_time_weighting(
+                x2[ch], zi=self._zi[ch],
+                alpha_rise=self._alpha_rise, alpha_fall=self._alpha_fall
+            )
 
 
 class PluginFastTimeWeighting(PluginSymmetricTimeWeighting):
