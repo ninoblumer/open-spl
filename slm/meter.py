@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Callable, TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from math import ceil
 
 import numpy as np
@@ -20,11 +20,10 @@ class Meter(ProcessingElement, ABC):
     blocksize: int = property(lambda self: self.parent.blocksize)
     width: int = property(lambda self: self.parent.width)
 
-    def __init__(self, name:str, parent: PluginMeter, **kwargs):
+    def __init__(self, name: str, parent: PluginMeter, **kwargs):
         super().__init__(**kwargs)
         self.name = name
         self.parent = parent
-
 
     def get_chain(self) -> list[Plugin | Bus | Meter]:
         chain = self.parent.get_chain()
@@ -32,90 +31,165 @@ class Meter(ProcessingElement, ABC):
         return chain
 
     @abstractmethod
-    def read(self) -> np.ndarray:
-        ...
+    def read(self) -> np.ndarray: ...
 
 
-# This works well for moving averages, but:
-# TODO: need a Meter for global max, min, mean... (so up to "now" (logging) or over the whole recording (reporting)
-class MovingMeter(Meter):
-    block_fn: Callable
-    fifo_fn: Callable
-    n_blocks: int
-    _fifo: FIFO
+# ---------------------------------------------------------------------------
+# AccumulatingMeter family — accumulate statistics over an unbounded window
+# ---------------------------------------------------------------------------
 
-    # t: float = property(lambda self: self.n_block * self.blocksize / self.samplerate)
-    t: float = property(lambda self: self._t)
+class AccumulatingMeter(Meter, ABC):
 
+    @abstractmethod
+    def process(self, block: np.ndarray): ...
 
-    # Functions
-    # _block_fn_last = staticmethod(lambda a: a[:, -1])
-    # _fifo_fn_last = staticmethod(lambda a: a[-1])
+    @abstractmethod
+    def read(self) -> np.ndarray: ...
 
-    @staticmethod
-    def _block_fn_last(a: np.ndarray) -> np.ndarray:
-        return a[-1]
-
-    @staticmethod
-    def _fifo_fn_last(a: np.ndarray) -> np.ndarray:
-        return a[-1]
-
-    def __init__(self, *, t: float | None = None,
-                 block_fn: Callable | None = None, fifo_fn: Callable | None = None, fn: Callable | None= None,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.block_fn = block_fn or fn
-        self.fifo_fn = fifo_fn or fn
-        if not self.block_fn or not self.fifo_fn:
-            raise ValueError("block_fn and fifo_fn must not be None, at least block_fn must be given.")
-
-        if t is None:
-            t = self.parent.bus.dt
-        self._t = t
-
-        self.n_blocks = ceil(self._t * self.samplerate / self.blocksize)
-        self._fifo = FIFO((self.width, self.n_blocks))
-
-
-    def process(self, block: np.ndarray):
-        # self._fifo.push(self.block_fn(block))
-        # result = self.block_fn(block)
-        result = np.apply_along_axis(self.block_fn, axis=1, arr=block)
-        self._fifo.push(result)
-
-    def read(self) -> np.ndarray:
-        return self._fifo.map(self.fifo_fn)
+    @abstractmethod
+    def reset(self): ...
 
     def to_str(self):
-        return f"MovingMeter(name={self.name}, block_fn={self.block_fn}, fifo_fn={self.fifo_fn})"
+        return f"{type(self).__name__}(name={self.name})"
 
 
-class AccumulatingMeter(Meter):
-    block_fn: Callable
-    comp_fn: Callable
-    _acc: np.ndarray
+class LeqAccumulator(AccumulatingMeter):
+    """Leq accumulator.
 
-    def __init__(self, *, block_fn: Callable, comp_fn: Callable, **kwargs):
+    Attaches to a frequency-weighting output (linear Pa).  Squares the input
+    internally.  ``read()`` returns mean square pressure (Pa²) so that
+    ``plugin.read_db()`` gives the correct Leq in dB SPL.
+    """
+
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.block_fn = block_fn
-        self.comp_fn = comp_fn
-        self._acc = np.zeros((self.width,))
-
-    def to_str(self):
-        return f"AccumulatingMeter(name={self.name}, block_fn={self.block_fn}, comp_fn={self.comp_fn})"
+        self._sum_sq = np.zeros((self.width,))
+        self._n_samples = 0
 
     def process(self, block: np.ndarray):
-        # metric = self.block_fn(block)
-        metric = np.apply_along_axis(self.block_fn, axis=1, arr=block)
-        stack = np.stack((metric, self._acc), axis=1)
-        result = np.apply_along_axis(self.comp_fn, axis=1, arr=stack)
-        self._acc = result
+        self._sum_sq += np.sum(block ** 2, axis=-1)
+        self._n_samples += block.shape[-1]
+
+    def read(self) -> np.ndarray:
+        return self._sum_sq / max(1, self._n_samples)
 
     def reset(self):
-        self._acc = np.zeros((self.width,))
+        self._sum_sq[:] = 0.0
+        self._n_samples = 0
+
+
+class MaxAccumulator(AccumulatingMeter):
+    """Running maximum accumulator.
+
+    Attaches to a time-weighting output (Pa², already squared).
+    ``read()`` returns the maximum Pa² value seen so far.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._acc = np.full((self.width,), -np.inf)
+
+    def process(self, block: np.ndarray):
+        self._acc = np.maximum(self._acc, np.max(block, axis=-1))
 
     def read(self) -> np.ndarray:
         return self._acc
+
+    def reset(self):
+        self._acc[:] = -np.inf
+
+
+class MinAccumulator(AccumulatingMeter):
+    """Running minimum accumulator.
+
+    Attaches to a time-weighting output (Pa², already squared).
+    ``read()`` returns the minimum Pa² value seen so far.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._acc = np.full((self.width,), np.inf)
+
+    def process(self, block: np.ndarray):
+        self._acc = np.minimum(self._acc, np.min(block, axis=-1))
+
+    def read(self) -> np.ndarray:
+        return self._acc
+
+    def reset(self):
+        self._acc[:] = np.inf
+
+
+# ---------------------------------------------------------------------------
+# MovingMeter family — rolling window statistics using a FIFO
+# ---------------------------------------------------------------------------
+
+class MovingMeter(Meter, ABC):
+
+    t: float = property(lambda self: self._t)
+
+    def __init__(self, *, t: float | None = None, **kwargs):
+        super().__init__(**kwargs)
+        if t is None:
+            t = self.parent.bus.dt
+        self._t = t
+        self.n_blocks = ceil(t * self.samplerate / self.blocksize)
+        self._fifo = FIFO((self.width, self.n_blocks))
+
+    @abstractmethod
+    def process(self, block: np.ndarray): ...
+
+    @abstractmethod
+    def read(self) -> np.ndarray: ...
+
+    def to_str(self):
+        return f"{type(self).__name__}(name={self.name}, t={self._t})"
+
+
+class LeqMovingMeter(MovingMeter):
+    """Rolling energy-mean Leq over a window of ``t`` seconds.
+
+    Attaches to a frequency-weighting output (linear Pa).  Squares internally.
+    Each FIFO slot stores the mean square for one block; ``read()`` returns
+    the mean of those values — the correct energy mean over the window.
+    """
+
+    def process(self, block: np.ndarray):
+        self._fifo.push(np.sum(block ** 2, axis=-1) / block.shape[-1])
+
+    def read(self) -> np.ndarray:
+        return self._fifo.map(np.mean)
+
+
+class MaxMovingMeter(MovingMeter):
+    """Rolling maximum over a window of ``t`` seconds."""
+
+    def process(self, block: np.ndarray):
+        self._fifo.push(np.max(block, axis=-1))
+
+    def read(self) -> np.ndarray:
+        return self._fifo.map(np.max)
+
+
+class MinMovingMeter(MovingMeter):
+    """Rolling minimum over a window of ``t`` seconds."""
+
+    def process(self, block: np.ndarray):
+        self._fifo.push(np.min(block, axis=-1))
+
+    def read(self) -> np.ndarray:
+        return self._fifo.map(np.min)
+
+
+class LastMovingMeter(MovingMeter):
+    """Exposes only the last (most-recent) sample of the rolling window."""
+
+    def process(self, block: np.ndarray):
+        self._fifo.push(block[:, -1])
+
+    def read(self) -> np.ndarray:
+        # FIFO.get() returns ordered buffer (oldest→newest); [:, -1] is most recent.
+        return self._fifo.get()[:, -1]
 
 
 TMeter = TypeVar("TMeter", bound=Meter)
