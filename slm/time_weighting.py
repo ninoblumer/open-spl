@@ -101,6 +101,27 @@ class PluginImpulseTimeWeighting(PluginAsymmetricTimeWeighting):
         super().__init__(time_constant="impulse", tau=(0.035, 1.500), **kwargs)
 
 
+class PluginSquare(PluginTimeWeighting):
+    """Instantaneous squaring — output = input².
+
+    Used for peak-level measurements where no time constant is desired.
+    Attaches to a frequency-weighting output (linear Pa); output is Pa²
+    so that MaxAccumulator can be used directly (consistent with all other
+    time-weighting plugins).
+    """
+    time_constant = "peak"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._compute_filter()
+
+    def _compute_filter(self):
+        pass  # no filter state
+
+    def func(self, block: np.ndarray):
+        np.square(block, out=self.output)
+
+
 @jit(nopython=True)
 def asymmetric_time_weighting(x, *, zi, alpha_rise, alpha_fall):
     """
