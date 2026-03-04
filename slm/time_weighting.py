@@ -133,7 +133,7 @@ def asymmetric_time_weighting(x, *, zi, alpha_rise, alpha_fall):
         else:
             a = alpha_fall
 
-        yn = a * prev + (1.0 - a) * x[n]
+        yn = (1.0 - a) * prev + a * x[n]
         y[n] = yn
         prev = yn
 

@@ -2,12 +2,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from slm.bus import Bus
+from slm.meter import Meter
+from slm.plugin_meter import PluginMeter
 
 if TYPE_CHECKING:
     from slm.frequency_weighting import PluginFrequencyWeighting
     from slm.plugin import Plugin
     from slm.controller import Controller
-    from slm.plugin import Plugin
 
 
 class Engine:
