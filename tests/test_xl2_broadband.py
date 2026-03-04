@@ -13,7 +13,7 @@ from slm.engine import Engine
 from slm.file_controller import FileController
 from slm.frequency_weighting import PluginAWeighting, PluginCWeighting, PluginZWeighting
 from slm.meter import LeqAccumulator, MaxAccumulator
-from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
+from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting, PluginSquare
 
 TOLERANCE_DB = 0.2      # ±0.2 dB for steady-state comparison with XL2
 TOLERANCE_Z_DB = 0.35   # IEC 61672-1 Annex E.5 defines Z(f) = 0 dB (flat passthrough).
@@ -82,6 +82,26 @@ def compute_lmax(meas, weighting_cls, tw_cls, blocksize=1024):
     return time_w.read_db("max")[0]
 
 
+def compute_lpeak(meas, weighting_cls, blocksize=1024):
+    """Compute Lpeak: max instantaneous squared pressure (no time weighting)."""
+    controller = _make_controller(meas, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", weighting_cls)
+
+    freq_w = bus.frequency_weighting
+    sq = bus.add_plugin(PluginSquare(input=freq_w, zero_zi=True))
+    sq.add_meter(MaxAccumulator(name="peak", parent=sq))
+
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+
+    return sq.read_db("peak")[0]
+
+
 def compute_interval_leq(meas, weighting_cls, dt=1.0, blocksize=4800):
     """Compute per-interval Leq (LAeq,dt) by manually tracking interval boundaries.
 
@@ -142,6 +162,13 @@ class TestSLM000Calibrator:
     def test_LAFmax(self, meas_000):
         ref = meas_000.report_value("LAFmax")
         assert abs(compute_lmax(meas_000, PluginAWeighting, PluginFastTimeWeighting) - ref) <= TOLERANCE_DB
+
+    def test_LCpeak(self, meas_000):
+        # XL2 LCPKmax = 97.0 dB; sine peak = RMS × √2 → +3.01 dB above 94 dB
+        assert abs(compute_lpeak(meas_000, PluginCWeighting) - 97.0) <= TOLERANCE_DB
+
+    def test_LZpeak(self, meas_000):
+        assert abs(compute_lpeak(meas_000, PluginZWeighting) - 97.0) <= TOLERANCE_Z_DB
 
 
 # --------------------------------------------------------------------------- #
