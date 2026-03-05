@@ -1,14 +1,8 @@
-from slm.meter import (
-    Meter, LastMovingMeter, MaxMovingMeter, MaxAccumulator,
-    LeqAccumulator, LeqMovingMeter,
-)
+from slm.meter import LastMovingMeter, MaxMovingMeter, MaxAccumulator
 from slm.plugin_meter import PluginMeter
 from slm.reporter import Reporter
 from util.xl2 import XL2_SLM_Measurement
 from pathlib import Path
-
-import soundfile as sf
-import numpy as np
 
 from slm.engine import Engine
 from slm.file_controller import FileController
@@ -28,8 +22,6 @@ def main():
     files = list(p.glob(f"{filename}_Audio_*.wav"))
     filepath = files[0]
 
-    data, fs = sf.read(str(filepath))
-
     controller = FileController(filename=filepath, blocksize=1024)
     sensitivity = 1 / (REFERENCE_PRESSURE * 10 ** (128.1 / 20))
     print(sensitivity)
@@ -41,8 +33,7 @@ def main():
     bus_z = engine.add_bus('Z', PluginZWeighting)
     bus_a = engine.add_bus('A', PluginAWeighting)
 
-    from slm.plugin import ReadMode
-    from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
+    from slm.time_weighting import PluginFastTimeWeighting
 
     la = bus_a.frequency_weighting
     laf = bus_a.add_plugin(PluginFastTimeWeighting(input=la, zero_zi=True))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Callable, TypeVar, TYPE_CHECKING, NamedTuple
+from typing import TypeVar, TYPE_CHECKING
 
 import numpy as np
 
@@ -11,11 +11,6 @@ if TYPE_CHECKING:
     from slm.meter import Meter
 
 
-
-# def find_plugin(function) -> type[Plugin]:
-#     raise RequestRejected(
-#         f"Function {function} is not implemented."
-#     )
 
 class Plugin(ProcessingElement, ABC):
     # id: str
@@ -65,13 +60,6 @@ class Plugin(ProcessingElement, ABC):
         chain.append(self)
         return chain
 
-    # def get(self):
-    #     return self.output
-
-    # @abstractmethod
-    # def implemented_function(self) -> str:
-    #     ...
-
     @abstractmethod
     def to_str(self):
         ...
@@ -81,9 +69,3 @@ class Plugin(ProcessingElement, ABC):
 
 
 TPlugin = TypeVar("TPlugin", bound=Plugin)
-
-# TODO: remove
-class ReadMode(NamedTuple):
-    name: str
-    value: Callable
-

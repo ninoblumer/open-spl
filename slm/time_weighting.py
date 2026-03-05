@@ -10,16 +10,6 @@ from slm.plugin_meter import PluginMeter
 
 class PluginTimeWeighting(PluginMeter, ABC):
     time_constant: str
-    # ReadModes = Enum("ReadModes", [
-    #     ("last", lambda a: a[:,-1]),
-    #     ("max", np.max),
-    #     ("min", np.min)
-    # ])
-
-    # class ReadModes(Enum):
-    #     last = lambda a: a[:,-1]
-    #     max = np.max
-    #     min = np.min
 
     def __init__(self, zero_zi: bool = True, **kwargs):
         super().__init__(**kwargs)
