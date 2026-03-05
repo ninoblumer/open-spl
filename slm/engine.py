@@ -104,9 +104,6 @@ class Engine:
             except StopIteration:
                 break
 
-        # hook for reporting
-        # TODO
-
     def _process_block(self) -> None:
         block, block_index = self._controller.read_block()
         block = block.transpose()
