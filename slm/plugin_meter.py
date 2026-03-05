@@ -6,9 +6,7 @@ import numpy as np
 from slm.plugin import Plugin
 
 from slm.meter import Meter, TMeter
-
-
-REFERENCE_PRESSURE = 20e-6
+from slm.constants import REFERENCE_PRESSURE
 class PluginMeter(Plugin, ABC):
     meters: dict[str, Meter]
 

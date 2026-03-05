@@ -3,6 +3,7 @@ from slm.meter import (
     LeqAccumulator, LeqMovingMeter,
 )
 from slm.plugin_meter import PluginMeter
+from slm.reporter import Reporter
 from util.xl2 import XL2_SLM_Measurement
 from pathlib import Path
 
@@ -12,8 +13,7 @@ import numpy as np
 from slm.engine import Engine
 from slm.file_controller import FileController
 from slm.octave_band import PluginOctaveBand
-
-REFERENCE_PRESSURE = 20e-6
+from slm.constants import REFERENCE_PRESSURE
 
 def main():
     projectname = "slm-test-01"
@@ -46,14 +46,14 @@ def main():
 
     la = bus_a.frequency_weighting
     laf = bus_a.add_plugin(PluginFastTimeWeighting(input=la, zero_zi=True))
-    laf_meter = laf.add_meter(LastMovingMeter(name="last, last, dt", parent=laf))
-    laf_max_accum_meter = laf.add_meter(MaxAccumulator(name="max, max", parent=laf))
-    la_max_dt = la.add_meter(MaxMovingMeter(name="max, max, dt", parent=la))
+    laf_meter = laf.add_meter(LastMovingMeter(name="LAF", parent=laf))
+    laf_max_accum_meter = laf.add_meter(MaxAccumulator(name="LAFmax", parent=laf))
+    la_max_dt = la.add_meter(MaxMovingMeter(name="LAmax_dt", parent=la))
 
     la_oct = bus_a.add_plugin(PluginOctaveBand(input=la, zero_zi=True, limits=(50, 5000), bands_per_oct=1))
     la_oct_f = bus_a.add_plugin(PluginFastTimeWeighting(input=la_oct, width=la_oct.n_bands, zero_zi=True))
-    la_oct_max_1s_meter = la_oct_f.add_meter(MaxMovingMeter(name="max, max, 1s", parent=la_oct_f, t=1.0))
-    la_oct_max_accum_meter = la_oct_f.add_meter(MaxAccumulator(name="max, max, T", parent=la_oct_f))
+    la_oct_max_1s_meter = la_oct_f.add_meter(MaxMovingMeter(name="LAFmax_1s", parent=la_oct_f, t=1.0))
+    la_oct_max_accum_meter = la_oct_f.add_meter(MaxAccumulator(name="LAFmax", parent=la_oct_f))
 
     for bus in engine._busses.values():
         print(f"Bus {bus.name}")
@@ -63,9 +63,21 @@ def main():
                 for meter in plugin.meters.values():
                     print(f"\t\t{meter}")
 
+    reporter = Reporter(print_to_console=True)
+    reporter.add_column("LAF", laf, "LAF")
+    reporter.add_column("LAFmax", laf, "LAFmax")
+    reporter.add_column("LAmax_dt", la, "LAmax_dt")
+    reporter.add_column("LAFmax_1s", la_oct_f, "LAFmax_1s",
+                        center_frequencies=la_oct.center_frequencies)
+    reporter.add_column("LAFmax", la_oct_f, "LAFmax",
+                        center_frequencies=la_oct.center_frequencies)
+    engine.reporter = reporter
+
     engine.run()
 
     engine.stop()
+
+    reporter.write("output/slm-test-01")
 
 
 if __name__ == '__main__':

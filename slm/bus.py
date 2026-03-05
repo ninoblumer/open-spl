@@ -1,13 +1,11 @@
 from __future__ import annotations
 import itertools
 from typing import TYPE_CHECKING
-from datetime import timedelta
 
 import numpy as np
 
 from slm.processing_element import ProcessingElement
 from slm.frequency_weighting import PluginFrequencyWeighting, PluginZWeighting
-from slm.plugin_meter import PluginMeter
 
 if TYPE_CHECKING:
     from slm.plugin import Plugin, TPlugin
@@ -37,7 +35,6 @@ class Bus(ProcessingElement):
         self.meters = []
         # self._counter = itertools.count(1)  # for numbering plugins with unique id
         self.block = np.zeros((1, self.blocksize))
-        self._last_log = timedelta(seconds=0)
 
         if frequency_weighting is None:
             frequency_weighting = PluginZWeighting
@@ -70,27 +67,6 @@ class Bus(ProcessingElement):
     #     self.meters.append(meter)
     #     return meter
 
-
-    def log_block(self, block_index: int):
-        timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
-
-        # delta = timestamp - self._last_log
-        # dt = delta.total_seconds()
-        # if dt > self.dt:
-        #     self._last_log = timestamp
-        # else:
-        #     return
-
-        if timestamp - self._last_log >= timedelta(seconds=self.dt):
-            self._last_log += timedelta(seconds=self.dt)
-            for plugin in self.plugins:
-                if isinstance(plugin, PluginMeter):
-                    for name, meter in plugin.meters.items():
-                        reading = plugin.read_db(name)
-                        if len(reading) == 1:
-                            print(f"{timestamp} {meter}: {reading[0]:.1f} dB")
-                        else:
-                            print(f"{timestamp} {meter}: [{", ".join([f"{x:.1f}" for x in reading])}] dB")
 
 
     def get_chain(self) -> list[ProcessingElement]:

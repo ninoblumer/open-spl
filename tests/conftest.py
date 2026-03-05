@@ -6,9 +6,9 @@ import pytest
 import soundfile as sf
 
 from util.xl2 import XL2_SLM_File
+from slm.constants import REFERENCE_PRESSURE
 
 DATA_DIR = Path("data/slm-test-01")
-REFERENCE_PRESSURE = 20e-6  # Pa
 
 
 def parse_fs_db(wav_path: Path) -> float:

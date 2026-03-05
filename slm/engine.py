@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from slm.bus import Bus
@@ -9,6 +10,7 @@ if TYPE_CHECKING:
     from slm.frequency_weighting import PluginFrequencyWeighting
     from slm.plugin import Plugin
     from slm.controller import Controller
+    from slm.reporter import Reporter
 
 
 class Engine:
@@ -22,6 +24,7 @@ class Engine:
         self._busses: dict[str, Bus] = dict()
         self._supported_functions: list[tuple[str]] = []
         self._dt = dt
+        self.reporter: Reporter | None = None
 
     def add_bus(self, name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None) -> Bus:
         bus = Bus(engine=self, name=name, frequency_weighting=frequency_weighting)
@@ -114,10 +117,9 @@ class Engine:
         for bus in self._busses.values():
             bus.process(block)
 
-        # hook for logging
-        for bus in self._busses.values():
-            # todo use yield ore so
-            bus.log_block(block_index)
+        if self.reporter is not None:
+            timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
+            self.reporter.record(timestamp, self._dt)
 
     def stop(self):
         self._controller.stop()
