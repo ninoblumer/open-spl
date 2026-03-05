@@ -66,7 +66,7 @@ class TestAddColumn:
     def test_widthN_goes_to_band(self):
         r = Reporter()
         p = _plugin(3, np.array([1.0, 2.0, 3.0]))
-        r.add_column("LZeq", p, "LZeq", center_frequencies=[63.0, 125.0, 250.0])
+        r.add_column("LZeq", p, "LZeq", center_frequencies=["63", "125", "250"])
         assert len(r._band_columns) == 1
         assert len(r._broadband_columns) == 0
 
@@ -142,7 +142,7 @@ class TestRecordContent:
         r = Reporter()
         vals = np.array([72.1, 81.4, 88.2])
         p = _plugin(3, vals)
-        r.add_column("LZeq", p, "LZeq", center_frequencies=[63.0, 125.0, 250.0])
+        r.add_column("LZeq", p, "LZeq", center_frequencies=["63", "125", "250"])
         r.record(_td(1.0), dt=1.0)
         row = r._band_rows[0]
         np.testing.assert_array_equal(row["LZeq"], vals)
@@ -152,7 +152,7 @@ class TestRecordContent:
         vals = np.array([72.1, 81.4, 88.2])
         r = Reporter()
         p = _plugin(3, vals)
-        r.add_column("LZeq", p, "LZeq", center_frequencies=[63.0, 125.0, 250.0])
+        r.add_column("LZeq", p, "LZeq", center_frequencies=["63", "125", "250"])
         r.record(_td(1.0), dt=1.0)
         stored = r._band_rows[0]["LZeq"]
         vals[:] = 0.0  # mutate original
@@ -243,7 +243,7 @@ class TestWriteRTA:
 
     def _make_reporter(self, tmp_path) -> tuple[Reporter, Path]:
         r = Reporter(precision=1)
-        freqs = [63.0, 125.0, 250.0]
+        freqs = ["63", "125", "250"]
         p = _plugin(3, np.array([72.1, 81.4, 88.2]))
         r.add_column("LZeq", p, "LZeq", center_frequencies=freqs)
         r.record(_td(1.0), dt=1.0)
@@ -263,7 +263,7 @@ class TestWriteRTA:
     def test_rta_log_headers(self, tmp_path):
         _, base = self._make_reporter(tmp_path)
         rows = list(csv.DictReader(open(base.parent / (base.name + "_rta_log.csv"))))
-        assert list(rows[0].keys()) == ["timestamp", "LZeq_63", "LZeq_125", "LZeq_250"]
+        assert list(rows[0].keys()) == ["timestamp", "LZeq_63", "LZeq_125", "LZeq_250"]  # strings used as-is
 
     def test_rta_log_row_count(self, tmp_path):
         _, base = self._make_reporter(tmp_path)
@@ -312,7 +312,7 @@ class TestConsoleOutput:
     def test_band_printed(self, capsys):
         r = Reporter(precision=1, print_to_console=True)
         p = _plugin(3, np.array([72.1, 81.4, 88.2]))
-        r.add_column("LZeq", p, "LZeq", center_frequencies=[63.0, 125.0, 250.0])
+        r.add_column("LZeq", p, "LZeq", center_frequencies=["63", "125", "250"])
         r.record(_td(1.0), dt=1.0)
         out = capsys.readouterr().out
         assert "LZeq:" in out
