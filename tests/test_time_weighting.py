@@ -31,6 +31,21 @@ def _sym_coeffs(tau: float) -> tuple[list, list]:
     return b, a
 
 
+def _sym_decay_db_per_s(tau: float) -> float:
+    """Drive symmetric filter to steady state, then apply 1 s of silence.
+
+    Returns dB drop per second.
+    IEC 61672-1 §5.8: Fast=34.7 dB/s, Slow=4.3 dB/s.
+    """
+    b, a = _sym_coeffs(tau)
+    n_rise = int(5 * tau * FS)
+    y_rise, zi = lfilter(b, a, np.ones(n_rise), zi=np.zeros(1))
+    y0 = float(y_rise[-1])
+    y_fall, _ = lfilter(b, a, np.zeros(FS), zi=zi)   # exactly 1 s at 48 kHz
+    y1 = float(y_fall[-1])
+    return 10 * np.log10(y0 / y1)
+
+
 def _sym_decay_ratio(tau: float) -> float:
     """
     Drive the symmetric filter toward steady state with x²=1, record y₀ (last
@@ -110,6 +125,11 @@ class TestFastDecayRate:
         ratio = _sym_decay_ratio(tau=0.125)
         np.testing.assert_allclose(ratio, np.exp(-1), rtol=RTOL)
 
+    def test_decay_rate_db_per_second(self):
+        """IEC 61672-1 §5.8: Fast time weighting shall decay at 34.7 dB/s."""
+        rate = _sym_decay_db_per_s(tau=0.125)
+        np.testing.assert_allclose(rate, 10 / (np.log(10) * 0.125), rtol=RTOL)
+
 
 # ---------------------------------------------------------------------------
 # Slow (tau = 1000 ms)
@@ -120,6 +140,11 @@ class TestSlowDecayRate:
         """y(tau) / y(0) must equal e^{-1} to confirm tau=1000 ms."""
         ratio = _sym_decay_ratio(tau=1.0)
         np.testing.assert_allclose(ratio, np.exp(-1), rtol=RTOL)
+
+    def test_decay_rate_db_per_second(self):
+        """IEC 61672-1 §5.8: Slow time weighting shall decay at 4.3 dB/s."""
+        rate = _sym_decay_db_per_s(tau=1.0)
+        np.testing.assert_allclose(rate, 10 / (np.log(10) * 1.0), rtol=RTOL)
 
 
 # ---------------------------------------------------------------------------
