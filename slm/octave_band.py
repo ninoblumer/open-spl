@@ -45,7 +45,7 @@ class StatefulOctaveFilterBank(OctaveFilterBank):
 
 class PluginOctaveBand(PluginMeter):
     n_bands: int = property(lambda self: self._filter_bank.num_bands)
-    center_frequencies: list[float] = property(lambda self: self._filter_bank.freq)
+    center_frequencies: list[str] = property(lambda self: self._filter_bank.nominal_freq)
 
     _filter_bank: OctaveFilterBank
 

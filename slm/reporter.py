@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class Reporter:
     def __init__(self, precision: int = 1, print_to_console: bool = False):
         self._broadband_columns: list[tuple[str, PluginMeter, str]] = []
-        self._band_columns: list[tuple[str, PluginMeter, str, list[float]]] = []
+        self._band_columns: list[tuple[str, PluginMeter, str, list[str]]] = []
         self._broadband_rows: list[dict] = []
         self._band_rows: list[dict] = []
         self._last_log: timedelta = timedelta(0)
@@ -29,7 +29,7 @@ class Reporter:
         return "{:02}:{:02}:{:06.3f}".format(h, m, s)
 
     def add_column(self, label: str, plugin: PluginMeter, meter_name: str,
-                   center_frequencies: list[float] | None = None) -> None:
+                   center_frequencies: list[str] | None = None) -> None:
         """Register a meter output as a column.
 
         Single-channel plugins go to broadband; multi-channel plugins go to band-split.
@@ -112,7 +112,7 @@ class Reporter:
             rta_fieldnames = ["timestamp"]
             for label, _, _, freqs in self._band_columns:
                 for freq in freqs:
-                    rta_fieldnames.append(f"{label}_{freq:.0f}")
+                    rta_fieldnames.append(f"{label}_{freq}")
 
             rta_log_path = path.parent / (path.name + "_rta_log.csv")
             with open(rta_log_path, "w", newline="") as f:
@@ -123,7 +123,7 @@ class Reporter:
                     for label, _, _, freqs in self._band_columns:
                         arr = row[label]
                         for freq, val in zip(freqs, arr):
-                            flat[f"{label}_{freq:.0f}"] = fmt.format(val)
+                            flat[f"{label}_{freq}"] = fmt.format(val)
                     writer.writerow(flat)
 
             rta_report_fieldnames = [f for f in rta_fieldnames if f != "timestamp"]
@@ -136,5 +136,5 @@ class Reporter:
                 for label, _, _, freqs in self._band_columns:
                     arr = last_band_row[label]
                     for freq, val in zip(freqs, arr):
-                        flat_last[f"{label}_{freq:.0f}"] = fmt.format(val)
+                        flat_last[f"{label}_{freq}"] = fmt.format(val)
                 writer.writerow(flat_last)
