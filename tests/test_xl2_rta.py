@@ -5,9 +5,9 @@ SLM_005 is a background-noise recording with no broadband log/report — only an
 RTA report.  We compute per-band LZeq from the WAV and compare against the
 XL2 RTA report's LZeq row.
 
-Tolerance: ±0.5 dB per band (wider than broadband due to digital Butterworth
-filters vs XL2 hardware filters, and XL2 hardware AC coupling attenuating the
-lowest-frequency bands).
+Tolerance: ±0.2 dB per band. Actual max error across all 12 bands is 0.11 dB
+(SLM_005). The original ±0.5 dB was set speculatively for XL2 AC-coupling
+attenuation at low bands, but measurement shows no systematic HPF pattern.
 """
 import numpy as np
 
@@ -16,7 +16,7 @@ from slm.file_controller import FileController
 from slm.frequency_weighting import PluginZWeighting
 from slm.octave_band import PluginOctaveBand
 
-TOLERANCE_RTA_DB = 0.5
+TOLERANCE_RTA_DB = 0.2
 
 
 # --------------------------------------------------------------------------- #
