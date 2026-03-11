@@ -56,7 +56,7 @@ class PluginOctaveBand(PluginMeter):
         super().__init__(**kwargs)
         self._zero_zi = zero_zi
 
-        if self.width != 1:
+        if self.input.width != 1:
             raise ValueError("OctaveBandPlugin only supports inputs of width=1")
 
         self._filter_bank = OctaveFilterBank(fs=self.samplerate, fraction=bands_per_oct, limits=list(limits),
@@ -64,6 +64,7 @@ class PluginOctaveBand(PluginMeter):
                                              ripple=ripple, attenuation=attenuation,
                                              stateful=True, steady_ic=not zero_zi, resample=False)
 
+        self._width = self.n_bands
         self.output = np.zeros((self.n_bands, self.blocksize))
 
     def func(self, block: np.ndarray):
