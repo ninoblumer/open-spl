@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -12,7 +12,8 @@ if TYPE_CHECKING:
 
 
 class Reporter:
-    def __init__(self, precision: int = 1, print_to_console: bool = False):
+    def __init__(self, precision: int = 1, print_to_console: bool = False,
+                 display_fn: Callable | None = None):
         self._broadband_columns: list[tuple[str, PluginMeter, str]] = []
         self._band_columns: list[tuple[str, PluginMeter, str, list[str]]] = []
         self._broadband_rows: list[dict] = []
@@ -20,6 +21,7 @@ class Reporter:
         self._last_log: timedelta = timedelta(0)
         self._precision = precision
         self._print_to_console = print_to_console
+        self._display_fn = display_fn
 
     def _fmt_timestamp(self, td: timedelta) -> str:
         total = td.total_seconds()
@@ -62,7 +64,11 @@ class Reporter:
             band_row[label] = plugin.read_db(meter_name).copy()
         self._band_rows.append(band_row)
 
-        if self._print_to_console:
+        if self._display_fn is not None:
+            bb_display = {k: v for k, v in broadband_row.items() if k != "timestamp"}
+            bd_display = {k: v for k, v in band_row.items() if k != "timestamp"}
+            self._display_fn(timestamp, bb_display, bd_display)
+        elif self._print_to_console:
             if self._broadband_columns:
                 parts = [ts_str]
                 for label, _, _ in self._broadband_columns:
