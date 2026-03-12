@@ -1,6 +1,7 @@
 """ read xl2 data and extract measurement"""
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 import pandas
 from pathlib import Path
@@ -82,6 +83,8 @@ class XL2_SLM_File:
 
         if token[0].strip().endswith(":"):
             return _SectionKeyValue
+        elif section_header == "Time":
+            return _SectionTime
         elif section_header.startswith("Broadband LOG"):
             return _SectionTable_123_Log
         elif section_header.startswith("Broadband"):
@@ -130,6 +133,30 @@ class _SectionPlainText(_Section):
 
     def _parse(self, parent: XL2_SLM_File):
         self.content = "\n".join(parent.lines[self._start:self._stop])
+
+
+class _SectionTime(_Section):
+    DATETIME_FMT = "%Y-%m-%d, %H:%M:%S"
+
+    def __init__(self, parent: XL2_SLM_File, header):
+        super().__init__(parent, header)
+        self.start: datetime | None = None
+        self.end: datetime | None = None
+        self._parse(parent)
+
+    def _parse(self, parent: XL2_SLM_File):
+        for line in parent.lines[self._start:self._stop]:
+            if not line.strip():
+                continue
+            tokens = line.lstrip('\t').split('\t')
+            key = tokens[0].strip().rstrip(':')
+            val = tokens[1].strip() if len(tokens) > 1 else ""
+            dt = datetime.strptime(val, self.DATETIME_FMT)
+            if key == "Start":
+                self.start = dt
+            elif key == "End":
+                self.end = dt
+
 
 class _SectionTable(_Section):
     def __init__(self, parent: XL2_SLM_File, header):
