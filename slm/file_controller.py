@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Generator
 
@@ -23,9 +24,12 @@ class FileController(Controller):
     _done: bool
 
 
-    def __init__(self, filename: str | Path, blocksize: int=256, overlap: int = 0, **kwargs):
+    def __init__(self, filename: str | Path, blocksize: int = 256, overlap: int = 0,
+                 realtime: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._sf = None
+        self._realtime = realtime
+        self._next_block_time: float | None = None
         self.open(filename, blocksize=blocksize, overlap=overlap)
 
     def open(self, filename: str | Path, *, blocksize: int, overlap: int = 0):
@@ -43,8 +47,17 @@ class FileController(Controller):
         self._sf = sf.SoundFile(filename)
         self._stream = self._sf.blocks(blocksize=self._blocksize, overlap=self._overlap,
                                        fill_value=0.0, always_2d=True)
+        self._next_block_time = None  # reset on (re-)open
 
     def read_block(self) -> tuple[np.ndarray, int]:
+        if self._realtime:
+            now = time.monotonic()
+            if self._next_block_time is None:
+                self._next_block_time = now
+            sleep_for = self._next_block_time - now
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+            self._next_block_time += self._blocksize / self._sf.samplerate
         try:
             return next(self._stream), next(self._counter)
         except StopIteration as e:

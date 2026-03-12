@@ -88,6 +88,7 @@ def run_measurement(
     print_to_console: bool = False,
     blocksize: int = 1024,
     display_mode: str = "plain",
+    realtime: bool = False,
 ) -> None:
     """Parse *config.metrics*, build the plugin chain, run the engine, write results."""
     from slm.assembly import parse_metric, build_chain
@@ -98,7 +99,7 @@ def run_measurement(
 
     specs = [parse_metric(m) for m in config.metrics]
 
-    controller = FileController(str(wav_path), blocksize=blocksize)
+    controller = FileController(str(wav_path), blocksize=blocksize, realtime=realtime)
     controller.set_sensitivity(sensitivity_v, unit="V")
 
     engine = Engine(controller, dt=config.dt)
@@ -143,6 +144,7 @@ class SLMShell(cmd.Cmd):
         self._wav_path = wav_path
         self._sensitivity_v = sensitivity_v
         self._display_mode: str = "plain"
+        self._realtime: bool = False
 
     # ------------------------------------------------------------------
     # Metric management
@@ -320,6 +322,7 @@ Use this when you have a physical calibrator and a recording of it; use
         print(f"  Output:      {self._config.output}")
         print(f"  Metrics:     {self._config.metrics or '(none)'}")
         print(f"  Display:     {self._display_mode}")
+        print(f"  Realtime:    {'on' if self._realtime else 'off'}")
 
     def do_save(self, arg: str) -> None:
         """save PATH.toml — save the current configuration to a TOML file."""
@@ -359,6 +362,29 @@ Use this when you have a physical calibrator and a recording of it; use
         self._display_mode = mode
         print(f"Display mode: {mode}")
 
+    def do_realtime(self, arg: str) -> None:
+        """realtime [on|off] — toggle simulated real-time playback.
+
+With no argument, shows the current state.
+With 'on' or 'off', enables or disables real-time pacing.
+
+When enabled, the engine processes each audio block at the same rate
+as it was recorded, so dt-interval updates arrive every dt real seconds.
+When disabled (default), the file is processed as fast as possible.
+"""
+        arg = arg.strip().lower()
+        if not arg:
+            print(f"  Realtime: {'on' if self._realtime else 'off'}")
+            return
+        if arg == "on":
+            self._realtime = True
+        elif arg == "off":
+            self._realtime = False
+        else:
+            print("Usage: realtime [on|off]")
+            return
+        print(f"  Realtime: {arg}")
+
     # ------------------------------------------------------------------
     # Chain inspector
     # ------------------------------------------------------------------
@@ -392,7 +418,7 @@ Use this when you have a physical calibrator and a recording of it; use
             "I": "PluginImpulseTimeWeighting",
         }
         _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator",
-                    "E": "LEAccumulator"}
+                    "last": "LastAccumulatingMeter", "E": "LEAccumulator"}
         _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter",
                     "E": "LEMovingMeter"}
 
@@ -411,46 +437,103 @@ Use this when you have a physical calibrator and a recording of it; use
             w_specs = by_weight[w]
 
             # Split specs into groups by upstream plugin type
-            freq_specs = [s for s in w_specs if s.time_weighting is None and s.bands is None]
+            freq_specs = [s for s in w_specs
+                          if s.time_weighting is None and s.bands is None and s.measure != "last"]
+            sq_specs = [s for s in w_specs
+                        if s.time_weighting is None and s.bands is None and s.measure == "last"]
             tw_groups: dict[str, list] = {}
             for s in w_specs:
                 if s.time_weighting is not None and s.bands is None:
                     tw_groups.setdefault(s.time_weighting, []).append(s)
-            band_groups: dict[tuple, list] = {}
+            # band_groups: keyed by (bands, bpo); value is dict tw_letter→[specs]
+            band_groups: dict[tuple, dict] = {}
             for s in w_specs:
                 if s.bands is not None:
-                    band_groups.setdefault((s.bands, s.bands_per_oct), []).append(s)
+                    key = (s.bands, s.bands_per_oct)
+                    tw_key = s.time_weighting or ""
+                    band_groups.setdefault(key, {}).setdefault(tw_key, []).append(s)
+
+            # Helper: print one meter line
+            def _print_meter(spec, prefix):
+                is_moving = spec.window_is_dt or spec.window_seconds is not None
+                if not is_moving:
+                    cls_name = _acc_cls[spec.measure]
+                    detail = ""
+                else:
+                    cls_name = _mov_cls[spec.measure]
+                    if spec.window_is_dt:
+                        detail = f"   t=dt={self._config.dt} s"
+                    else:
+                        detail = f"   t={spec.window_seconds} s"
+                print(f"{prefix} {spec.name:<32} {cls_name}{detail}")
 
             groups: list[tuple[str, list]] = []
             if freq_specs:
                 groups.append(("freq_weighting", freq_specs))
+            if sq_specs:
+                groups.append(("PluginSquare", sq_specs))
             for tw_letter, tw_list in tw_groups.items():
                 groups.append((_tw_plugin[tw_letter], tw_list))
-            for (bands, bpo), band_list in band_groups.items():
-                bpo_label = "1/3" if bpo == 3.0 else "1/1"
-                tag = f"PluginOctaveBand  limits=({bands[0]:.0f}, {bands[1]:.0f} Hz)  bpo={bpo_label}"
-                groups.append((tag, band_list))
+
+            n_band_keys = len(band_groups)
+            n_non_band = len(groups)
+            total_groups = n_non_band + n_band_keys
 
             for gi, (group_name, group_specs) in enumerate(groups):
-                is_last_group = gi == len(groups) - 1
+                is_last_group = gi == total_groups - 1
                 grp_pfx = child_pfx + ("└──" if is_last_group else "├──")
                 met_pfx = child_pfx + ("    " if is_last_group else "│   ")
                 print(f"{grp_pfx} {group_name}")
-
                 for si, spec in enumerate(group_specs):
                     is_last = si == len(group_specs) - 1
                     m_pfx = met_pfx + ("└──" if is_last else "├──")
-                    is_moving = spec.window_is_dt or spec.window_seconds is not None
-                    if not is_moving:
-                        cls_name = _acc_cls[spec.measure]
-                        detail = ""
+                    _print_meter(spec, m_pfx)
+
+            for bi, ((bands, bpo), tw_dict) in enumerate(band_groups.items()):
+                gi = n_non_band + bi
+                is_last_group = gi == total_groups - 1
+                grp_pfx = child_pfx + ("└──" if is_last_group else "├──")
+                band_pfx = child_pfx + ("    " if is_last_group else "│   ")
+                bpo_label = "1/3" if bpo == 3.0 else "1/1"
+                print(f"{grp_pfx} PluginOctaveBand  limits=({bands[0]:.0f}, {bands[1]:.0f} Hz)  bpo={bpo_label}")
+
+                tw_keys = list(tw_dict.keys())
+                for ti, tw_key in enumerate(tw_keys):
+                    tw_specs = tw_dict[tw_key]
+                    is_last_tw = ti == len(tw_keys) - 1
+                    if tw_key:
+                        # band + time-weighting: extra level
+                        tw_pfx = band_pfx + ("└──" if is_last_tw else "├──")
+                        met_pfx2 = band_pfx + ("    " if is_last_tw else "│   ")
+                        print(f"{tw_pfx} {_tw_plugin[tw_key]}")
+                        for si, spec in enumerate(tw_specs):
+                            is_last = si == len(tw_specs) - 1
+                            m_pfx = met_pfx2 + ("└──" if is_last else "├──")
+                            _print_meter(spec, m_pfx)
                     else:
-                        cls_name = _mov_cls[spec.measure]
-                        if spec.window_is_dt:
-                            detail = f"   t=dt={self._config.dt} s"
-                        else:
-                            detail = f"   t={spec.window_seconds} s"
-                    print(f"{m_pfx} {spec.name:<32} {cls_name}{detail}")
+                        # band only: check if bare "last" metrics need PluginSquare level
+                        last_specs = [s for s in tw_specs if s.measure == "last"]
+                        other_specs = [s for s in tw_specs if s.measure != "last"]
+                        all_sub = []
+                        if other_specs:
+                            all_sub.append(("", other_specs))
+                        if last_specs:
+                            all_sub.append(("sq", last_specs))
+                        for subi, (sub_key, sub_specs) in enumerate(all_sub):
+                            is_last_sub = subi == len(all_sub) - 1 and is_last_tw
+                            if sub_key == "sq":
+                                sq_pfx = band_pfx + ("└──" if is_last_sub else "├──")
+                                sq_met_pfx = band_pfx + ("    " if is_last_sub else "│   ")
+                                print(f"{sq_pfx} PluginSquare")
+                                for si, spec in enumerate(sub_specs):
+                                    is_last = si == len(sub_specs) - 1
+                                    m_pfx = sq_met_pfx + ("└──" if is_last else "├──")
+                                    _print_meter(spec, m_pfx)
+                            else:
+                                for si, spec in enumerate(sub_specs):
+                                    is_last = si == len(sub_specs) - 1 and is_last_sub
+                                    m_pfx = band_pfx + ("└──" if is_last else "├──")
+                                    _print_meter(spec, m_pfx)
 
     def do_inspect(self, arg: str) -> None:
         """inspect METRIC — show detailed human-readable info for a metric."""
@@ -480,7 +563,7 @@ Use this when you have a physical calibrator and a recording of it; use
             "I": "I (impulse)",
         }
         _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator",
-                    "E": "LEAccumulator"}
+                    "last": "LastAccumulatingMeter", "E": "LEAccumulator"}
         _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter",
                     "E": "LEMovingMeter"}
 
@@ -543,6 +626,7 @@ Use this when you have a physical calibrator and a recording of it; use
             self._config,
             print_to_console=True,
             display_mode=self._display_mode,
+            realtime=self._realtime,
         )
 
     # ------------------------------------------------------------------

@@ -36,4 +36,5 @@ class PluginMeter(Plugin, ABC):
         return self.meters[name].read()
 
     def read_db(self, name):
-        return 10*np.log10(self.read_lin(name)/(REFERENCE_PRESSURE*self.sensitivity)**2)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return 10 * np.log10(self.read_lin(name) / (REFERENCE_PRESSURE * self.sensitivity) ** 2)

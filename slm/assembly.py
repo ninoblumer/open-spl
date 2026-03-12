@@ -76,11 +76,7 @@ def parse_metric(name: str) -> MetricSpec:
         raise ValueError(
             f"L{weighting}{measure} requires a time-weighting letter (F, S, or I): {name!r}"
         )
-    if measure is None and not tw:
-        raise ValueError(
-            f"Bare metric {name!r} requires a time-weighting letter (F, S, or I). "
-            f"Did you mean L{weighting}eq?"
-        )
+    # bare metric with no time-weighting letter → allowed (uses PluginSquare in build_chain)
     if measure == "E" and tw:
         raise ValueError(
             f"LE does not use a time-weighting letter: {name!r}"
@@ -144,6 +140,7 @@ def build_chain(
     )
     from slm.time_weighting import (
         PluginFastTimeWeighting, PluginSlowTimeWeighting, PluginImpulseTimeWeighting,
+        PluginSquare,
     )
     from slm.octave_band import PluginOctaveBand
     from slm.meter import (
@@ -169,7 +166,10 @@ def build_chain(
 
     buses: dict[str, object] = {}
     tw_plugins: dict[tuple, object] = {}
+    sq_plugins: dict[str, object] = {}
     band_plugins: dict[tuple, object] = {}
+    band_tw_plugins: dict[tuple, object] = {}
+    band_sq_plugins: dict[tuple, object] = {}
 
     def get_bus(w: str):
         if w not in buses:
@@ -198,12 +198,49 @@ def build_chain(
             band_plugins[key] = plugin
         return band_plugins[key]
 
+    def get_sq_plugin(w: str):
+        if w not in sq_plugins:
+            bus = get_bus(w)
+            plugin = PluginSquare(input=bus.frequency_weighting)
+            bus.add_plugin(plugin)
+            sq_plugins[w] = plugin
+        return sq_plugins[w]
+
+    def get_band_sq_plugin(w: str, bands: tuple[float, float], bpo: float):
+        key = (w, bands, bpo)
+        if key not in band_sq_plugins:
+            band_plugin = get_band_plugin(w, bands, bpo)
+            plugin = PluginSquare(input=band_plugin, width=band_plugin.width)
+            get_bus(w).add_plugin(plugin)
+            band_sq_plugins[key] = plugin
+        return band_sq_plugins[key]
+
+    def get_band_tw_plugin(w: str, bands: tuple[float, float], bpo: float, tw_letter: str):
+        key = (w, bands, bpo, tw_letter)
+        if key not in band_tw_plugins:
+            band_plugin = get_band_plugin(w, bands, bpo)
+            plugin = _tw_cls[tw_letter](input=band_plugin, zero_zi=True, width=band_plugin.width)
+            get_bus(w).add_plugin(plugin)
+            band_tw_plugins[key] = plugin
+        return band_tw_plugins[key]
+
     for spec in specs:
         # Resolve the upstream plugin this metric reads from
         if spec.bands is not None:
-            plugin = get_band_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
+            if spec.time_weighting is not None:
+                plugin = get_band_tw_plugin(
+                    spec.weighting, spec.bands, spec.bands_per_oct, spec.time_weighting
+                )
+            elif spec.measure == "last":
+                # no TW, bare metric per band: square first so output is Pa²
+                plugin = get_band_sq_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
+            else:
+                plugin = get_band_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
         elif spec.time_weighting is not None:
             plugin = get_tw_plugin(spec.weighting, spec.time_weighting)
+        elif spec.measure == "last":
+            # no TW, broadband bare metric: square first so output is Pa²
+            plugin = get_sq_plugin(spec.weighting)
         else:
             bus = get_bus(spec.weighting)
             plugin = bus.frequency_weighting
@@ -221,5 +258,9 @@ def build_chain(
         plugin.create_meter(meter_cls, name=spec.name, **meter_kwargs)
 
         # Register with reporter
-        center_freqs = plugin.center_frequencies if spec.bands is not None else None
+        if spec.bands is not None:
+            band_plugin = get_band_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
+            center_freqs = band_plugin.center_frequencies
+        else:
+            center_freqs = None
         reporter.add_column(spec.name, plugin, spec.name, center_frequencies=center_freqs)

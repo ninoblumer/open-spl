@@ -11,8 +11,12 @@ import soundfile as sf
 from slm.assembly import MetricSpec, parse_metric, build_chain
 from slm.engine import Engine
 from slm.file_controller import FileController
-from slm.meter import LeqAccumulator, LeqMovingMeter, MaxAccumulator, MinAccumulator, LEAccumulator, LEMovingMeter
+from slm.meter import (
+    LeqAccumulator, LeqMovingMeter, MaxAccumulator, MinAccumulator,
+    LEAccumulator, LEMovingMeter, LastAccumulatingMeter,
+)
 from slm.octave_band import PluginOctaveBand
+from slm.time_weighting import PluginFastTimeWeighting, PluginSquare
 from slm.reporter import Reporter
 
 
@@ -87,6 +91,13 @@ class TestParseMetricValid:
             "LAE:bands:63-8000",
             "A", None, "E", False, None, (63.0, 8000.0), 1.0,
         ),
+        # bare metrics: time-weighting letter optional; measure defaults to "last"
+        ("LZF",               "Z", "F",  "last", False, None, None,          1.0),
+        ("LAF",               "A", "F",  "last", False, None, None,          1.0),
+        ("LZ",                "Z", None, "last", False, None, None,          1.0),
+        ("LA",                "A", None, "last", False, None, None,          1.0),
+        ("LZF:bands:63-8000", "Z", "F",  "last", False, None, (63.0, 8000.0), 1.0),
+        ("LZ:bands:63-8000",  "Z", None, "last", False, None, (63.0, 8000.0), 1.0),
     ])
     def test_valid(self, name, weighting, tw, measure,
                    window_is_dt, window_secs, bands, bpo):
@@ -257,6 +268,109 @@ class TestBuildChainStructure:
         freq_w = bus.frequency_weighting
         assert "LAE_dt" in freq_w.meters
         assert isinstance(freq_w.meters["LAE_dt"], LEMovingMeter)
+
+    # -- band + time-weighting chain (regression: previously NaN) -----------
+
+    def test_band_tw_chain_structure(self, tmp_path):
+        """LZF:bands:63-8000 → OctaveBand → FTW (not OctaveBand → LastMeter directly).
+
+        Regression: before the fix, build_chain ignored time_weighting when
+        bands was set, chaining OctaveBand directly to LastAccumulatingMeter.
+        LastAccumulatingMeter then read raw linear Pa (signed) → log10(negative) = NaN.
+        """
+        engine, _ = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        bus = engine._busses["Z"]
+        freq_w = bus.frequency_weighting
+        non_fw = [p for p in bus.plugins if p is not freq_w]
+
+        ob = next(p for p in non_fw if isinstance(p, PluginOctaveBand))
+        tw = next(p for p in non_fw if isinstance(p, PluginFastTimeWeighting))
+
+        assert tw.input is ob, "FTW must be downstream of OctaveBand, not freq_w"
+        assert tw.width == ob.width > 1, "FTW width must equal n_bands"
+        assert "LZF:bands:63-8000" in tw.meters
+        assert isinstance(tw.meters["LZF:bands:63-8000"], LastAccumulatingMeter)
+
+    def test_band_tw_width_not_one(self, tmp_path):
+        """FTW plugin on band output must have width == n_bands, not 1.
+
+        Regression: without explicit width= propagation, PluginFastTimeWeighting
+        defaulted to width=1 and crashed with a broadcast error on the first block.
+        """
+        engine, _ = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        bus = engine._busses["Z"]
+        tw = next(p for p in bus.plugins if isinstance(p, PluginFastTimeWeighting))
+        ob = next(p for p in bus.plugins if isinstance(p, PluginOctaveBand))
+        assert tw.width == ob.n_bands
+
+    def test_band_tw_shared_plugin(self, tmp_path):
+        """LZF:bands + LZFmax:bands same limits → one band-TW plugin, two meters."""
+        engine, _ = _run_chain(tmp_path, ["LZF:bands:63-8000", "LZFmax:bands:63-8000"])
+        bus = engine._busses["Z"]
+        ftw_plugins = [p for p in bus.plugins if isinstance(p, PluginFastTimeWeighting)]
+        assert len(ftw_plugins) == 1
+        assert "LZF:bands:63-8000" in ftw_plugins[0].meters
+        assert "LZFmax:bands:63-8000" in ftw_plugins[0].meters
+
+    def test_band_tw_no_nan(self, tmp_path):
+        """LZF:bands:63-8000 must not produce NaN — core regression check."""
+        _, reporter = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        _, plugin, meter_name, _ = reporter._band_columns[0]
+        vals = plugin.read_db(meter_name)
+        assert not np.any(np.isnan(vals)), f"NaN in LZF:bands output: {vals}"
+
+    def test_band_tw_some_bands_finite(self, tmp_path):
+        """At least one band has a finite level for a 1 kHz sine (1 kHz octave band)."""
+        _, reporter = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        _, plugin, meter_name, _ = reporter._band_columns[0]
+        vals = plugin.read_db(meter_name)
+        assert np.any(np.isfinite(vals)), f"No finite values in LZF:bands output: {vals}"
+
+    # -- band + no-TW (PluginSquare) chain ----------------------------------
+
+    def test_band_sq_chain_structure(self, tmp_path):
+        """LZ:bands:63-8000 → OctaveBand → PluginSquare with correct width."""
+        engine, _ = _run_chain(tmp_path, ["LZ:bands:63-8000"])
+        bus = engine._busses["Z"]
+        freq_w = bus.frequency_weighting
+        non_fw = [p for p in bus.plugins if p is not freq_w]
+
+        ob = next(p for p in non_fw if isinstance(p, PluginOctaveBand))
+        sq = next(p for p in non_fw if isinstance(p, PluginSquare))
+
+        assert sq.input is ob
+        assert sq.width == ob.width > 1
+        assert "LZ:bands:63-8000" in sq.meters
+        assert isinstance(sq.meters["LZ:bands:63-8000"], LastAccumulatingMeter)
+
+    def test_band_sq_no_nan(self, tmp_path):
+        """LZ:bands:63-8000 must not produce NaN."""
+        _, reporter = _run_chain(tmp_path, ["LZ:bands:63-8000"])
+        _, plugin, meter_name, _ = reporter._band_columns[0]
+        vals = plugin.read_db(meter_name)
+        assert not np.any(np.isnan(vals)), f"NaN in LZ:bands output: {vals}"
+
+    # -- broadband bare metric (PluginSquare) --------------------------------
+
+    def test_broadband_sq_chain_structure(self, tmp_path):
+        """LZ → PluginSquare on bus, LastAccumulatingMeter."""
+        engine, _ = _run_chain(tmp_path, ["LZ"])
+        bus = engine._busses["Z"]
+        freq_w = bus.frequency_weighting
+        non_fw = [p for p in bus.plugins if p is not freq_w]
+
+        sq = next(p for p in non_fw if isinstance(p, PluginSquare))
+        assert sq.input is freq_w
+        assert sq.width == 1
+        assert "LZ" in sq.meters
+        assert isinstance(sq.meters["LZ"], LastAccumulatingMeter)
+
+    def test_broadband_sq_no_nan(self, tmp_path):
+        """LZ on a 1 kHz sine must not produce NaN (may be -inf at zero crossings)."""
+        _, reporter = _run_chain(tmp_path, ["LZ"])
+        _, plugin, meter_name = reporter._broadband_columns[0]
+        val = plugin.read_db(meter_name)[0]
+        assert not np.isnan(val)
 
 
 # ---------------------------------------------------------------------------
