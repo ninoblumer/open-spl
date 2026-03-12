@@ -61,6 +61,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Logging interval in seconds (default: 1.0)",
     )
 
+    parser.add_argument(
+        "--realtime", "-r", action="store_true",
+        help="Simulate real-time playback: pace processing so each dt interval takes dt real seconds",
+    )
+
     sens_group = parser.add_mutually_exclusive_group()
     sens_group.add_argument(
         "--fs-db", type=float, metavar="DB",
@@ -181,7 +186,7 @@ def main() -> None:
             "--sensitivity-dbv DBV, or --sensitivity-mv MV"
         )
 
-    run_measurement(args.file, sens, config, print_to_console=True)
+    run_measurement(args.file, sens, config, print_to_console=True, realtime=args.realtime)
 
 
 if __name__ == "__main__":
