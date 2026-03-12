@@ -120,6 +120,28 @@ class MinAccumulator(AccumulatingMeter):
         self._acc[:] = np.inf
 
 
+class LastAccumulatingMeter(AccumulatingMeter):
+    """Tracks only the last sample of the most-recent block.
+
+    Attaches to a time-weighting output (Pa², already squared).
+    ``read()`` returns the value of the final sample in the last block
+    processed.  No window or FIFO is needed.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._last = np.zeros((self.width,))
+
+    def process(self, block: np.ndarray):
+        self._last = block[:, -1]
+
+    def read(self) -> np.ndarray:
+        return self._last
+
+    def reset(self):
+        self._last[:] = 0.0
+
+
 # ---------------------------------------------------------------------------
 # MovingMeter family — rolling window statistics using a FIFO
 # ---------------------------------------------------------------------------

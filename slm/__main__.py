@@ -5,7 +5,10 @@ Modes
 Interactive REPL (default when no action flags are given)::
 
     python -m slm
-    python -m slm -i / --interactive
+
+Interactive REPL with pre-populated state (combine -i with other flags)::
+
+    python -m slm -i --file PATH --sensitivity-dbv DBV [--measure METRIC ...] [...]
 
 Calibration (derive sensitivity from a calibrator-tone recording)::
 
@@ -94,18 +97,38 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # Interactive REPL                                                     #
     # ------------------------------------------------------------------ #
-    is_interactive = (
-        args.interactive
-        or (
-            not args.file
-            and not args.calibrate
-            and not args.measure
-            and not args.config
-        )
-    )
-    if is_interactive:
+    no_action = not args.file and not args.calibrate and not args.measure and not args.config
+    if no_action:
+        # Bare invocation — open an empty shell
         from slm.cli import SLMShell
         SLMShell().cmdloop()
+        return
+
+    if args.interactive:
+        # --interactive alongside other flags: pre-populate shell state
+        from slm.cli import SLMShell
+        from slm.config import SLMConfig
+
+        if args.config:
+            config = SLMConfig.from_toml(args.config)
+            if args.measure:
+                config.metrics = list(args.measure)
+            if args.output != "output/measurement":
+                config.output = args.output
+            if args.dt != 1.0:
+                config.dt = args.dt
+        else:
+            config = SLMConfig.from_args(
+                metrics=list(args.measure) if args.measure else [],
+                dt=args.dt,
+                output=args.output,
+            )
+
+        SLMShell(
+            wav_path=args.file,
+            sensitivity_v=_resolve_sensitivity(args),
+            config=config,
+        ).cmdloop()
         return
 
     # ------------------------------------------------------------------ #

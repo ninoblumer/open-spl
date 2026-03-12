@@ -130,12 +130,18 @@ class SLMShell(cmd.Cmd):
     intro = "SLM interactive shell.  Type 'help' for a list of commands."
     prompt = "slm> "
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        wav_path: str | None = None,
+        sensitivity_v: float | None = None,
+        config: "SLMConfig | None" = None,
+    ) -> None:
         super().__init__()
         from slm.config import SLMConfig
-        self._config = SLMConfig()
-        self._wav_path: str | None = None
-        self._sensitivity_v: float | None = None
+        self._config = config if config is not None else SLMConfig()
+        self._wav_path = wav_path
+        self._sensitivity_v = sensitivity_v
         self._display_mode: str = "plain"
 
     # ------------------------------------------------------------------

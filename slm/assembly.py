@@ -24,9 +24,9 @@ if TYPE_CHECKING:
 
 _WINDOW_UNIT_SECONDS: dict[str, float] = {"s": 1.0, "m": 60.0, "h": 3600.0}
 
-# L  weighting  [time-weighting]  measure  [_window]  [:bands:[1/3:]fmin-fmax]
+# L  weighting  [time-weighting]  [measure]  [_window]  [:bands:[1/3:]fmin-fmax]
 _PATTERN = re.compile(
-    r"^L([ACZ])([FSI]?)(eq|max|min)"
+    r"^L([ACZ])([FSI]?)(eq|max|min)?"
     r"(?:_(dt|\d+[smh]))?"
     r"(?::bands:(?:(1/3):)?(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?))?$"
 )
@@ -66,6 +66,7 @@ def parse_metric(name: str) -> MetricSpec:
     weighting, tw, measure, window_str, third_oct, fmin_str, fmax_str = m.groups()
 
     # Leq must not have a time-weighting letter; max/min must have one
+    # No measure → "last" (just the most-recent time-weighted sample); requires tw
     if measure == "eq" and tw:
         raise ValueError(
             f"Leq cannot have a time-weighting letter (got {name!r}). "
@@ -74,6 +75,20 @@ def parse_metric(name: str) -> MetricSpec:
     if measure in ("max", "min") and not tw:
         raise ValueError(
             f"L{weighting}{measure} requires a time-weighting letter (F, S, or I): {name!r}"
+        )
+    if measure is None and not tw:
+        raise ValueError(
+            f"Bare metric {name!r} requires a time-weighting letter (F, S, or I). "
+            f"Did you mean L{weighting}eq?"
+        )
+    if measure is None:
+        measure = "last"
+
+    # "last" is a single-sample snapshot — a window suffix makes no sense
+    # Check window_str before we parse it
+    if measure == "last" and window_str is not None:
+        raise ValueError(
+            f"Bare metric {name!r} (no eq/max/min) cannot have a window suffix."
         )
 
     # Parse window suffix
@@ -128,7 +143,7 @@ def build_chain(
     )
     from slm.octave_band import PluginOctaveBand
     from slm.meter import (
-        LeqAccumulator, MaxAccumulator, MinAccumulator,
+        LeqAccumulator, MaxAccumulator, MinAccumulator, LastAccumulatingMeter,
         LeqMovingMeter, MaxMovingMeter, MinMovingMeter,
     )
 
@@ -142,7 +157,7 @@ def build_chain(
         "S": PluginSlowTimeWeighting,
         "I": PluginImpulseTimeWeighting,
     }
-    _acc_cls = {"eq": LeqAccumulator, "max": MaxAccumulator, "min": MinAccumulator}
+    _acc_cls = {"eq": LeqAccumulator, "max": MaxAccumulator, "min": MinAccumulator, "last": LastAccumulatingMeter}
     _mov_cls = {"eq": LeqMovingMeter, "max": MaxMovingMeter, "min": MinMovingMeter}
 
     buses: dict[str, object] = {}
