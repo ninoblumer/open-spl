@@ -214,4 +214,30 @@ class LastMovingMeter(MovingMeter):
         return self._fifo.get()[:, -1]
 
 
+class LEAccumulator(LeqAccumulator):
+    """Sound exposure level (LE) accumulator.
+
+    Attaches to a frequency-weighting output (linear Pa). Squares internally.
+    ``read()`` returns ``sum_sq / samplerate`` (Pa²·s) so that
+    ``plugin.read_db()`` gives LE = Leq + 10·log₁₀(T / T₀) in dB (T₀ = 1 s).
+    Equivalent to: 10·log₁₀(Σp² / samplerate / p₀²).
+    """
+
+    def read(self) -> np.ndarray:
+        # sum_sq / samplerate = E (Pa²·s); read_db divides by p₀² → LE.
+        return self._sum_sq / self.samplerate
+
+
+class LEMovingMeter(LeqMovingMeter):
+    """Rolling sound exposure level over a window of ``t`` seconds.
+
+    ``read()`` returns ``mean_sq * t`` (Pa²·s) so that ``plugin.read_db()``
+    gives LE_window = Leq_window + 10·log₁₀(T_window / T₀) in dB (T₀ = 1 s).
+    """
+
+    def read(self) -> np.ndarray:
+        # mean_sq * t = E_window (Pa²·s); read_db divides by p₀² → LE_window.
+        return self._fifo.map(np.mean) * self._t
+
+
 TMeter = TypeVar("TMeter", bound=Meter)

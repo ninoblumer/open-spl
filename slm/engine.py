@@ -98,11 +98,16 @@ class Engine:
 
 
     def run(self):
+        self._last_timestamp: timedelta | None = None
         while True:
             try:
                 self._process_block()
             except StopIteration:
                 break
+        # Force a final snapshot so the report always reflects the fully-accumulated state,
+        # even when the file duration is not an exact multiple of dt.
+        if self.reporter is not None and self._last_timestamp is not None:
+            self.reporter.record(self._last_timestamp, 0)
 
     def _process_block(self) -> None:
         block, block_index = self._controller.read_block()
@@ -116,6 +121,7 @@ class Engine:
 
         if self.reporter is not None:
             timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
+            self._last_timestamp = timestamp
             self.reporter.record(timestamp, self._dt)
 
     def stop(self):

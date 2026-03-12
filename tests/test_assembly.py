@@ -11,7 +11,7 @@ import soundfile as sf
 from slm.assembly import MetricSpec, parse_metric, build_chain
 from slm.engine import Engine
 from slm.file_controller import FileController
-from slm.meter import LeqAccumulator, LeqMovingMeter, MaxAccumulator, MinAccumulator
+from slm.meter import LeqAccumulator, LeqMovingMeter, MaxAccumulator, MinAccumulator, LEAccumulator, LEMovingMeter
 from slm.octave_band import PluginOctaveBand
 from slm.reporter import Reporter
 
@@ -78,6 +78,15 @@ class TestParseMetricValid:
             "LAeq_dt:bands:63-8000",
             "A", None, "eq", True, None, (63.0, 8000.0), 1.0,
         ),
+        ("LAE",          "A", None, "E", False, None,  None, 1.0),
+        ("LCE",          "C", None, "E", False, None,  None, 1.0),
+        ("LZE",          "Z", None, "E", False, None,  None, 1.0),
+        ("LAE_10s",      "A", None, "E", False, 10.0,  None, 1.0),
+        ("LAE_dt",       "A", None, "E", True,  None,  None, 1.0),
+        (
+            "LAE:bands:63-8000",
+            "A", None, "E", False, None, (63.0, 8000.0), 1.0,
+        ),
     ])
     def test_valid(self, name, weighting, tw, measure,
                    window_is_dt, window_secs, bands, bpo):
@@ -128,6 +137,10 @@ class TestParseMetricInvalid:
     def test_max_without_time_weighting_message(self):
         with pytest.raises(ValueError, match="time-weighting"):
             parse_metric("LAmax")
+
+    def test_le_with_time_weighting_message(self):
+        with pytest.raises(ValueError, match="LE does not use a time-weighting letter"):
+            parse_metric("LAFE")
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +238,26 @@ class TestBuildChainStructure:
         _, reporter = _run_chain(tmp_path, ["LAeq"], dt=0.5)
         assert len(reporter._broadband_rows) >= 1
 
+    def test_lae_creates_le_accumulator_shares_bus(self, tmp_path):
+        """LAE creates LEAccumulator; shares A-bus freq-weighting with LAeq."""
+        engine, _ = _run_chain(tmp_path, ["LAeq", "LAE"])
+        bus = engine._busses["A"]
+        freq_w = bus.frequency_weighting
+        assert "LAeq" in freq_w.meters
+        assert "LAE" in freq_w.meters
+        assert isinstance(freq_w.meters["LAE"], LEAccumulator)
+        # No extra plugins beyond frequency weighting
+        non_fw = [p for p in bus.plugins if p is not freq_w]
+        assert len(non_fw) == 0
+
+    def test_lae_dt_creates_le_moving_meter(self, tmp_path):
+        """LAE_dt creates LEMovingMeter on freq-weighting plugin."""
+        engine, _ = _run_chain(tmp_path, ["LAE_dt"])
+        bus = engine._busses["A"]
+        freq_w = bus.frequency_weighting
+        assert "LAE_dt" in freq_w.meters
+        assert isinstance(freq_w.meters["LAE_dt"], LEMovingMeter)
+
 
 # ---------------------------------------------------------------------------
 # Numerical tests (XL2 fixtures)
@@ -290,6 +323,18 @@ class TestAssemblyNumerical:
         ref_max = meas_000.report_value("LAFmax")
         assert abs(float(row["LAeq"]) - ref_leq) <= TOLERANCE_DB
         assert abs(float(row["LAFmax"]) - ref_max) <= TOLERANCE_DB
+
+    def test_lae_equals_laeq_plus_log_T(self, meas_003):
+        """LAE = LAeq + 10*log10(T) — pure arithmetic identity, ±0.01 dB."""
+        import soundfile as sf
+        info = sf.info(str(meas_003.wav_path))
+        T = info.frames / info.samplerate
+
+        row = self._run(meas_003, ["LAeq", "LAE"])
+        laeq = float(row["LAeq"])
+        lae = float(row["LAE"])
+        expected_lae = laeq + 10 * np.log10(T)
+        assert abs(lae - expected_lae) <= 0.01
 
 
 # ---------------------------------------------------------------------------

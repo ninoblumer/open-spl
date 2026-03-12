@@ -26,7 +26,7 @@ _WINDOW_UNIT_SECONDS: dict[str, float] = {"s": 1.0, "m": 60.0, "h": 3600.0}
 
 # L  weighting  [time-weighting]  [measure]  [_window]  [:bands:[1/3:]fmin-fmax]
 _PATTERN = re.compile(
-    r"^L([ACZ])([FSI]?)(eq|max|min)?"
+    r"^L([ACZ])([FSI]?)(eq|max|min|E)?"
     r"(?:_(dt|\d+[smh]))?"
     r"(?::bands:(?:(1/3):)?(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?))?$"
 )
@@ -80,6 +80,10 @@ def parse_metric(name: str) -> MetricSpec:
         raise ValueError(
             f"Bare metric {name!r} requires a time-weighting letter (F, S, or I). "
             f"Did you mean L{weighting}eq?"
+        )
+    if measure == "E" and tw:
+        raise ValueError(
+            f"LE does not use a time-weighting letter: {name!r}"
         )
     if measure is None:
         measure = "last"
@@ -145,6 +149,7 @@ def build_chain(
     from slm.meter import (
         LeqAccumulator, MaxAccumulator, MinAccumulator, LastAccumulatingMeter,
         LeqMovingMeter, MaxMovingMeter, MinMovingMeter,
+        LEAccumulator, LEMovingMeter,
     )
 
     _w_cls = {
@@ -157,8 +162,10 @@ def build_chain(
         "S": PluginSlowTimeWeighting,
         "I": PluginImpulseTimeWeighting,
     }
-    _acc_cls = {"eq": LeqAccumulator, "max": MaxAccumulator, "min": MinAccumulator, "last": LastAccumulatingMeter}
-    _mov_cls = {"eq": LeqMovingMeter, "max": MaxMovingMeter, "min": MinMovingMeter}
+    _acc_cls = {"eq": LeqAccumulator, "max": MaxAccumulator, "min": MinAccumulator,
+                "last": LastAccumulatingMeter, "E": LEAccumulator}
+    _mov_cls = {"eq": LeqMovingMeter, "max": MaxMovingMeter, "min": MinMovingMeter,
+                "E": LEMovingMeter}
 
     buses: dict[str, object] = {}
     tw_plugins: dict[tuple, object] = {}

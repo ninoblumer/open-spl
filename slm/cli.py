@@ -391,8 +391,10 @@ Use this when you have a physical calibrator and a recording of it; use
             "S": "PluginSlowTimeWeighting",
             "I": "PluginImpulseTimeWeighting",
         }
-        _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator"}
-        _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter"}
+        _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator",
+                    "E": "LEAccumulator"}
+        _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter",
+                    "E": "LEMovingMeter"}
 
         # Group by weighting
         by_weight: dict[str, list] = {}
@@ -477,8 +479,10 @@ Use this when you have a physical calibrator and a recording of it; use
             "S": "S (slow, tau=1.0 s)",
             "I": "I (impulse)",
         }
-        _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator"}
-        _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter"}
+        _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator",
+                    "E": "LEAccumulator"}
+        _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter",
+                    "E": "LEMovingMeter"}
 
         is_moving = spec.window_is_dt or spec.window_seconds is not None
         if is_moving:
