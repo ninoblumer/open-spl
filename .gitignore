@@ -1,3 +1,4 @@
 .idea
 output/**
 .claude/**
+**/__pycache__
