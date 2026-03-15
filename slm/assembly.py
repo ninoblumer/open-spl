@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from slm.bus import Bus
     from slm.engine import Engine
-    from slm.reporter import Reporter
+    from slm.io.reporter import Reporter
+    from slm.plugin_meter import PluginMeter
 
 
 # ---------------------------------------------------------------------------
@@ -38,16 +40,37 @@ _PATTERN = re.compile(
 
 @dataclass
 class MetricSpec:
-    """Parsed representation of a single metric name."""
+    """Parsed representation of a single metric name.
+
+    Produced by :func:`parse_metric` and consumed by :func:`build_chain`.
+    All fields are derived solely from the metric name string — no engine
+    state is needed to construct one.
+    """
 
     name: str
-    weighting: str               # 'A', 'C', or 'Z'
-    time_weighting: str | None   # 'F', 'S', 'I', or None
-    measure: str                 # 'eq', 'max', or 'min'
-    window_is_dt: bool           # True when the suffix was '_dt'
-    window_seconds: float | None # explicit window in seconds, or None (accumulating)
-    bands: tuple[float, float] | None  # (fmin, fmax), or None for broadband
-    bands_per_oct: float         # 1.0 for 1/1-oct, 3.0 for 1/3-oct
+    """Original metric name string, e.g. ``'LAFmax'``."""
+
+    weighting: str
+    """Frequency-weighting letter: ``'A'``, ``'C'``, or ``'Z'``."""
+
+    time_weighting: str | None
+    """Time-weighting letter (``'F'``, ``'S'``, ``'I'``), or ``None`` for Leq/LE/bare."""
+
+    measure: str
+    """Aggregation kind: ``'eq'``, ``'max'``, ``'min'``, ``'E'`` (sound exposure), or
+    ``'last'`` (most-recent time-weighted sample, bare metric syntax)."""
+
+    window_is_dt: bool
+    """``True`` when the window suffix was ``_dt`` (use the engine's block interval)."""
+
+    window_seconds: float | None
+    """Explicit moving-window duration in seconds, or ``None`` for an accumulating meter."""
+
+    bands: tuple[float, float] | None
+    """``(fmin, fmax)`` band limits in Hz, or ``None`` for broadband."""
+
+    bands_per_oct: float
+    """Filter density: ``1.0`` for 1/1-octave, ``3.0`` for 1/3-octave."""
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +79,18 @@ class MetricSpec:
 
 def parse_metric(name: str) -> MetricSpec:
     """Parse a metric name string into a :class:`MetricSpec`.
+
+    Supported syntax::
+
+        L[ACZ][FSI?](eq|max|min|E)[_(dt|Ns|Nm|Nh)][:bands:[1/3:]fmin-fmax]
+
+    Examples::
+
+        parse_metric("LAeq")              # broadband A-weighted Leq, accumulating
+        parse_metric("LAFmax_dt")         # A-weighted fast-max, moving (engine dt window)
+        parse_metric("LZeq_30s")          # Z-weighted Leq, 30-second moving window
+        parse_metric("LZeq:bands:63-8000")  # Z-weighted per 1/1-oct band, accumulating
+        parse_metric("LAF")               # bare metric: most-recent A-fast sample
 
     Raises :exc:`ValueError` for any invalid or inconsistent name.
     """
@@ -100,6 +135,11 @@ def parse_metric(name: str) -> MetricSpec:
         else:
             n = float(window_str[:-1])
             unit = window_str[-1]
+            if unit not in _WINDOW_UNIT_SECONDS:
+                valid = ", ".join(_WINDOW_UNIT_SECONDS)
+                raise ValueError(
+                    f"Unknown window unit {unit!r} in {name!r}; expected one of: {valid}"
+                )
             window_seconds = n * _WINDOW_UNIT_SECONDS[unit]
 
     # Parse band limits
@@ -127,13 +167,28 @@ def parse_metric(name: str) -> MetricSpec:
 
 def build_chain(
     specs: list[MetricSpec],
-    engine: "Engine",
-    reporter: "Reporter",
+    engine: Engine,
+    reporter: Reporter,
 ) -> None:
     """Wire buses, plugins, and meters for *specs*; register each with *reporter*.
 
     Shared upstream nodes (buses, time-weighting plugins, octave-band plugins)
     are created lazily and reused across specs with identical parameters.
+    For example, ``LAFmax`` and ``LAFeq_dt`` share the same A-weighted bus and
+    the same fast time-weighting plugin — only their meters differ.
+
+    The signal chain for a broadband metric is::
+
+        Bus(freq-weighting) → [time-weighting | PluginSquare] → Meter
+
+    For a band metric::
+
+        Bus(freq-weighting) → PluginOctaveBand → [time-weighting | PluginSquare] → Meter
+
+    Args:
+        specs:    List of parsed metric descriptors, typically from :func:`parse_metric`.
+        engine:   The :class:`~slm.engine.Engine` instance to attach buses to.
+        reporter: The :class:`~slm.io.reporter.Reporter` that collects meter readings.
     """
     from slm.frequency_weighting import (
         PluginAWeighting, PluginCWeighting, PluginZWeighting,
@@ -149,34 +204,51 @@ def build_chain(
         LEAccumulator, LEMovingMeter,
     )
 
-    _w_cls = {
+    # Maps weighting letter → frequency-weighting plugin class
+    _w_cls: dict[str, type[PluginMeter]] = {
         "A": PluginAWeighting,
         "C": PluginCWeighting,
         "Z": PluginZWeighting,
     }
-    _tw_cls = {
+    # Maps time-weighting letter → time-weighting plugin class
+    _tw_cls: dict[str, type[PluginMeter]] = {
         "F": PluginFastTimeWeighting,
         "S": PluginSlowTimeWeighting,
         "I": PluginImpulseTimeWeighting,
     }
-    _acc_cls = {"eq": LeqAccumulator, "max": MaxAccumulator, "min": MinAccumulator,
-                "last": LastAccumulatingMeter, "E": LEAccumulator}
-    _mov_cls = {"eq": LeqMovingMeter, "max": MaxMovingMeter, "min": MinMovingMeter,
-                "E": LEMovingMeter}
+    # Maps measure string → accumulating meter class (no moving window)
+    _acc_cls: dict[str, type[PluginMeter]] = {
+        "eq": LeqAccumulator,
+        "max": MaxAccumulator,
+        "min": MinAccumulator,
+        "last": LastAccumulatingMeter,
+        "E": LEAccumulator,
+    }
+    # Maps measure string → moving-window meter class
+    # Note: "last" is intentionally absent — bare metrics always use an accumulating meter.
+    _mov_cls: dict[str, type[PluginMeter]] = {
+        "eq": LeqMovingMeter,
+        "max": MaxMovingMeter,
+        "min": MinMovingMeter,
+        "E": LEMovingMeter,
+    }
 
-    buses: dict[str, object] = {}
-    tw_plugins: dict[tuple, object] = {}
-    sq_plugins: dict[str, object] = {}
-    band_plugins: dict[tuple, object] = {}
-    band_tw_plugins: dict[tuple, object] = {}
-    band_sq_plugins: dict[tuple, object] = {}
+    # Lazy-creation caches keyed by the parameters that uniquely identify each node.
+    buses: dict[str, Bus] = {}
+    tw_plugins: dict[tuple[str, str], PluginMeter] = {}
+    sq_plugins: dict[str, PluginMeter] = {}
+    band_plugins: dict[tuple[str, tuple[float, float], float], PluginMeter] = {}
+    band_tw_plugins: dict[tuple[str, tuple[float, float], float, str], PluginMeter] = {}
+    band_sq_plugins: dict[tuple[str, tuple[float, float], float], PluginMeter] = {}
 
-    def get_bus(w: str):
+    def get_bus(w: str) -> Bus:
+        """Return the frequency-weighted bus for weighting letter *w*, creating it if needed."""
         if w not in buses:
             buses[w] = engine.add_bus(w, _w_cls[w])
         return buses[w]
 
-    def get_tw_plugin(w: str, tw_letter: str):
+    def get_tw_plugin(w: str, tw_letter: str) -> PluginMeter:
+        """Return the broadband time-weighting plugin for (*w*, *tw_letter*), creating if needed."""
         key = (w, tw_letter)
         if key not in tw_plugins:
             bus = get_bus(w)
@@ -186,7 +258,8 @@ def build_chain(
             tw_plugins[key] = plugin
         return tw_plugins[key]
 
-    def get_band_plugin(w: str, bands: tuple[float, float], bpo: float):
+    def get_band_plugin(w: str, bands: tuple[float, float], bpo: float) -> PluginMeter:
+        """Return the octave-band filter bank for (*w*, *bands*, *bpo*), creating if needed."""
         key = (w, bands, bpo)
         if key not in band_plugins:
             bus = get_bus(w)
@@ -198,7 +271,11 @@ def build_chain(
             band_plugins[key] = plugin
         return band_plugins[key]
 
-    def get_sq_plugin(w: str):
+    def get_sq_plugin(w: str) -> PluginMeter:
+        """Return the broadband squaring plugin for *w*, creating if needed.
+
+        Used for bare metrics (no time-weighting) so the meter receives Pa² input.
+        """
         if w not in sq_plugins:
             bus = get_bus(w)
             plugin = PluginSquare(input=bus.frequency_weighting)
@@ -206,7 +283,11 @@ def build_chain(
             sq_plugins[w] = plugin
         return sq_plugins[w]
 
-    def get_band_sq_plugin(w: str, bands: tuple[float, float], bpo: float):
+    def get_band_sq_plugin(w: str, bands: tuple[float, float], bpo: float) -> PluginMeter:
+        """Return the per-band squaring plugin for (*w*, *bands*, *bpo*), creating if needed.
+
+        Used for bare per-band metrics so each band output is in Pa².
+        """
         key = (w, bands, bpo)
         if key not in band_sq_plugins:
             band_plugin = get_band_plugin(w, bands, bpo)
@@ -215,7 +296,14 @@ def build_chain(
             band_sq_plugins[key] = plugin
         return band_sq_plugins[key]
 
-    def get_band_tw_plugin(w: str, bands: tuple[float, float], bpo: float, tw_letter: str):
+    def get_band_tw_plugin(
+        w: str, bands: tuple[float, float], bpo: float, tw_letter: str
+    ) -> PluginMeter:
+        """Return the per-band time-weighting plugin for (*w*, *bands*, *bpo*, *tw_letter*).
+
+        The plugin is inserted after the octave-band filter bank so each band
+        is time-weighted independently.
+        """
         key = (w, bands, bpo, tw_letter)
         if key not in band_tw_plugins:
             band_plugin = get_band_plugin(w, bands, bpo)
@@ -249,7 +337,7 @@ def build_chain(
         is_moving = spec.window_is_dt or spec.window_seconds is not None
         if not is_moving:
             meter_cls = _acc_cls[spec.measure]
-            meter_kwargs: dict = {}
+            meter_kwargs: dict[str, float] = {}
         else:
             meter_cls = _mov_cls[spec.measure]
             # window_is_dt=True → no 't' kwarg → MovingMeter defaults to bus.dt
@@ -257,7 +345,7 @@ def build_chain(
 
         plugin.create_meter(meter_cls, name=spec.name, **meter_kwargs)
 
-        # Register with reporter
+        # Register with reporter; band metrics also pass centre frequencies for column labels
         if spec.bands is not None:
             band_plugin = get_band_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
             center_freqs = band_plugin.center_frequencies

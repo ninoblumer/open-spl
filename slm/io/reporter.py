@@ -11,27 +11,29 @@ if TYPE_CHECKING:
     from slm.plugin_meter import PluginMeter
 
 
+def _fmt_timestamp(td: timedelta) -> str:
+    """Format a timedelta as ``HH:MM:SS.mmm``."""
+    total = td.total_seconds()
+    h = int(total) // 3600
+    m = (int(total) % 3600) // 60
+    s = total % 60
+    return "{:02}:{:02}:{:06.3f}".format(h, m, s)
+
+
 class Reporter:
     def __init__(self, precision: int = 1, print_to_console: bool = False,
                  display_fn: Callable | None = None):
         self._broadband_columns: list[tuple[str, PluginMeter, str]] = []
-        self._band_columns: list[tuple[str, PluginMeter, str, list[str]]] = []
+        self._band_columns: list[tuple[str, PluginMeter, str, list[float]]] = []
         self._broadband_rows: list[dict] = []
         self._band_rows: list[dict] = []
-        self._last_log: timedelta = timedelta(0)
+        self._last_log: timedelta | None = None
         self._precision = precision
         self._print_to_console = print_to_console
         self._display_fn = display_fn
 
-    def _fmt_timestamp(self, td: timedelta) -> str:
-        total = td.total_seconds()
-        h = int(total) // 3600
-        m = (int(total) % 3600) // 60
-        s = total % 60
-        return "{:02}:{:02}:{:06.3f}".format(h, m, s)
-
     def add_column(self, label: str, plugin: PluginMeter, meter_name: str,
-                   center_frequencies: list[str] | None = None) -> None:
+                   center_frequencies: list[float] | None = None) -> None:
         """Register a meter output as a column.
 
         Single-channel plugins go to broadband; multi-channel plugins go to band-split.
@@ -48,11 +50,11 @@ class Reporter:
 
     def record(self, timestamp: timedelta, dt: float) -> None:
         """Sample all registered meters and append rows if dt has elapsed since last log."""
-        if (timestamp - self._last_log).total_seconds() < dt:
+        if self._last_log is not None and (timestamp - self._last_log).total_seconds() < dt:
             return
 
         fmt = f"{{:.{self._precision}f}}"
-        ts_str = self._fmt_timestamp(timestamp)
+        ts_str = _fmt_timestamp(timestamp)
 
         broadband_row: dict = {"timestamp": timestamp}
         for label, plugin, meter_name in self._broadband_columns:
@@ -90,7 +92,7 @@ class Reporter:
 
         def _format_value(v) -> str:
             if isinstance(v, timedelta):
-                return self._fmt_timestamp(v)
+                return _fmt_timestamp(v)
             return fmt.format(v)
 
         # --- Broadband ---

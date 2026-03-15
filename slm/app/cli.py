@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from slm.constants import REFERENCE_PRESSURE
 
 if TYPE_CHECKING:
-    from slm.config import SLMConfig
+    from slm.app.config import SLMConfig
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ def calibrate_sensitivity(
     The calibrator is assumed to emit *cal_level* dB SPL.  Returns a value
     suitable for ``controller.set_sensitivity(result, unit="V")``.
     """
-    from slm.file_controller import FileController
+    from slm.io.file_controller import FileController
     from slm.engine import Engine
     from slm.frequency_weighting import PluginZWeighting
     from slm.meter import LeqAccumulator
@@ -91,11 +91,13 @@ def run_measurement(
     realtime: bool = False,
 ) -> None:
     """Parse *config.metrics*, build the plugin chain, run the engine, write results."""
+    if sensitivity_v <= 0:
+        raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
     from slm.assembly import parse_metric, build_chain
-    from slm.file_controller import FileController
+    from slm.io.file_controller import FileController
     from slm.engine import Engine
-    from slm.reporter import Reporter
-    from slm.display import make_display_fn
+    from slm.io.reporter import Reporter
+    from slm.io.display import make_display_fn
 
     specs = [parse_metric(m) for m in config.metrics]
 
@@ -139,7 +141,7 @@ class SLMShell(cmd.Cmd):
         config: "SLMConfig | None" = None,
     ) -> None:
         super().__init__()
-        from slm.config import SLMConfig
+        from slm.app.config import SLMConfig
         self._config = config if config is not None else SLMConfig()
         self._wav_path = wav_path
         self._sensitivity_v = sensitivity_v
@@ -317,7 +319,7 @@ Use this when you have a physical calibrator and a recording of it; use
     def do_show(self, _: str) -> None:
         """show — display the current configuration."""
         print(f"  File:        {self._wav_path or '(not set)'}")
-        print(f"  Sensitivity: {self._sensitivity_v or '(not set)'}")
+        print(f"  Sensitivity: {'(not set)' if self._sensitivity_v is None else self._sensitivity_v}")
         print(f"  dt:          {self._config.dt} s")
         print(f"  Output:      {self._config.output}")
         print(f"  Metrics:     {self._config.metrics or '(none)'}")
@@ -338,7 +340,7 @@ Use this when you have a physical calibrator and a recording of it; use
 
     def do_load(self, arg: str) -> None:
         """load PATH.toml — load configuration from a TOML file."""
-        from slm.config import SLMConfig
+        from slm.app.config import SLMConfig
         path = arg.strip()
         if not path:
             print("Usage: load PATH.toml")
@@ -427,6 +429,19 @@ When disabled (default), the file is processed as fast as possible.
         for spec in specs:
             by_weight.setdefault(spec.weighting, []).append(spec)
 
+        def _print_meter(spec, prefix):
+            is_moving = spec.window_is_dt or spec.window_seconds is not None
+            if not is_moving:
+                cls_name = _acc_cls[spec.measure]
+                detail = ""
+            else:
+                cls_name = _mov_cls[spec.measure]
+                if spec.window_is_dt:
+                    detail = f"   t=dt={self._config.dt} s"
+                else:
+                    detail = f"   t={spec.window_seconds} s"
+            print(f"{prefix} {spec.name:<32} {cls_name}{detail}")
+
         weight_keys = list(by_weight.keys())
         for wi, w in enumerate(weight_keys):
             is_last_bus = wi == len(weight_keys) - 1
@@ -452,20 +467,6 @@ When disabled (default), the file is processed as fast as possible.
                     key = (s.bands, s.bands_per_oct)
                     tw_key = s.time_weighting or ""
                     band_groups.setdefault(key, {}).setdefault(tw_key, []).append(s)
-
-            # Helper: print one meter line
-            def _print_meter(spec, prefix):
-                is_moving = spec.window_is_dt or spec.window_seconds is not None
-                if not is_moving:
-                    cls_name = _acc_cls[spec.measure]
-                    detail = ""
-                else:
-                    cls_name = _mov_cls[spec.measure]
-                    if spec.window_is_dt:
-                        detail = f"   t=dt={self._config.dt} s"
-                    else:
-                        detail = f"   t={spec.window_seconds} s"
-                print(f"{prefix} {spec.name:<32} {cls_name}{detail}")
 
             groups: list[tuple[str, list]] = []
             if freq_specs:
@@ -614,7 +615,7 @@ When disabled (default), the file is processed as fast as possible.
         if not self._wav_path:
             print("No file set.  Use: file PATH")
             return
-        if not self._sensitivity_v:
+        if self._sensitivity_v is None:
             print("No sensitivity set.  Use: sensitivity ... or calibrate")
             return
         if not self._config.metrics:

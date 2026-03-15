@@ -41,9 +41,19 @@ class SLMConfig:
         if unknown_metrics:
             raise ValueError(f"Unknown keys in [metrics]: {unknown_metrics}")
 
+        require = metrics_sec.get("require", [])
+        if not isinstance(require, list) or not all(isinstance(m, str) for m in require):
+            raise ValueError(
+                f"[metrics] require must be a list of strings, got {require!r}"
+            )
+
+        dt = float(meas.get("dt", 1.0))
+        if dt <= 0:
+            raise ValueError(f"[measurement] dt must be positive, got {dt}")
+
         return cls(
-            metrics=list(metrics_sec.get("require", [])),
-            dt=float(meas.get("dt", 1.0)),
+            metrics=list(require),
+            dt=dt,
             output=str(meas.get("output", "output/measurement")),
         )
 
