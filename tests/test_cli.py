@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from slm.config import SLMConfig
-from slm.cli import (
+from slm.app.config import SLMConfig
+from slm.app.cli import (
     sensitivity_from_fs_db,
     sensitivity_from_mv,
     sensitivity_from_dbv,
@@ -115,7 +115,7 @@ class TestSensitivityHelpers:
 class TestCLIArgParsing:
 
     def test_measure_flag(self):
-        from slm.__main__ import _build_parser
+        from slm.app.__main__ import _build_parser
         parser = _build_parser()
         args = parser.parse_args([
             "--measure", "LAeq", "LAFmax",
@@ -124,46 +124,48 @@ class TestCLIArgParsing:
         assert args.measure == ["LAeq", "LAFmax"]
 
     def test_sensitivity_fs_db(self):
-        from slm.__main__ import _build_parser, _resolve_sensitivity
+        from slm.app.__main__ import _build_parser, _resolve_sensitivity
         parser = _build_parser()
         args = parser.parse_args(["--file", "f.wav", "--fs-db", "128.1", "--measure", "LAeq"])
         assert _resolve_sensitivity(args) == pytest.approx(sensitivity_from_fs_db(128.1))
 
     def test_sensitivity_mv(self):
-        from slm.__main__ import _build_parser, _resolve_sensitivity
+        from slm.app.__main__ import _build_parser, _resolve_sensitivity
         parser = _build_parser()
         args = parser.parse_args(["--file", "f.wav", "--sensitivity-mv", "50", "--measure", "LAeq"])
         assert _resolve_sensitivity(args) == pytest.approx(sensitivity_from_mv(50.0))
 
     def test_sensitivity_dbv(self):
-        from slm.__main__ import _build_parser, _resolve_sensitivity
+        from slm.app.__main__ import _build_parser, _resolve_sensitivity
         parser = _build_parser()
         args = parser.parse_args(["--file", "f.wav", "--sensitivity-dbv", "-20", "--measure", "LAeq"])
         assert _resolve_sensitivity(args) == pytest.approx(sensitivity_from_dbv(-20.0))
 
     def test_no_sensitivity_flag_returns_none(self):
-        from slm.__main__ import _build_parser, _resolve_sensitivity
+        from slm.app.__main__ import _build_parser, _resolve_sensitivity
         parser = _build_parser()
         args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
         assert _resolve_sensitivity(args) is None
 
     def test_mutually_exclusive_sensitivity_flags(self):
-        from slm.__main__ import _build_parser
+        from slm.app.__main__ import _build_parser
         parser = _build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["--fs-db", "128.1", "--sensitivity-mv", "50"])
 
     def test_dt_default(self):
-        from slm.__main__ import _build_parser
+        from slm.app.__main__ import _build_parser
         parser = _build_parser()
         args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
-        assert args.dt == pytest.approx(1.0)
+        # --dt default is None; main() applies the 1.0 fallback when building SLMConfig
+        assert args.dt is None
 
     def test_output_default(self):
-        from slm.__main__ import _build_parser
+        from slm.app.__main__ import _build_parser
         parser = _build_parser()
         args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
-        assert args.output == "output/measurement"
+        # --output default is None; main() applies the "output/measurement" fallback
+        assert args.output is None
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +213,34 @@ class TestRunMeasurementIntegration:
         )
         assert (tmp_path / "result_rta_log.csv").exists()
         assert (tmp_path / "result_rta_report.csv").exists()
+
+    def test_dt_shorter_than_block_warns_and_still_correct(self, meas_000, tmp_path):
+        """When dt < blocksize/samplerate, a UserWarning is emitted and the
+        overall result is still correct (resolution is clamped to one entry per block)."""
+        import soundfile as sf
+        info = sf.info(str(meas_000.wav_path))
+        blocksize = 1024
+        block_duration = blocksize / info.samplerate  # ~0.021 s at 48 kHz
+        dt = block_duration / 4  # clearly shorter than one block
+
+        config = SLMConfig(metrics=["LAeq"], dt=dt,
+                           output=str(tmp_path / "result"))
+        with pytest.warns(UserWarning, match="dt=.*shorter than one block"):
+            run_measurement(
+                str(meas_000.wav_path), meas_000.sensitivity, config,
+                print_to_console=False,
+            )
+
+        # Overall LAeq must still be within tolerance
+        with open(tmp_path / "result_report.csv") as f:
+            row = next(csv.DictReader(f))
+        assert abs(float(row["LAeq"]) - 94.0) <= 0.18
+
+        # Log must have one row per block (every block recorded, not every dt)
+        with open(tmp_path / "result_log.csv") as f:
+            n_rows = sum(1 for _ in csv.DictReader(f))
+        expected_blocks = info.frames // blocksize
+        assert n_rows == pytest.approx(expected_blocks, abs=2)
 
 
 # ---------------------------------------------------------------------------

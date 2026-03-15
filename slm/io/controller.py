@@ -42,4 +42,6 @@ class Controller(ABC):
             self._sensitivity = sensitivity
         elif unit == "dB":
             self._sensitivity = 10**(sensitivity/20)
+        else:
+            raise ValueError(f"Unknown sensitivity unit: {unit!r}. Expected 'mV', 'V', or 'dB'.")
 

@@ -6,13 +6,7 @@ import sys
 from datetime import timedelta
 from typing import Callable
 
-
-def _fmt_timestamp(td: timedelta) -> str:
-    total = td.total_seconds()
-    h = int(total) // 3600
-    m = (int(total) % 3600) // 60
-    s = total % 60
-    return "{:02}:{:02}:{:06.3f}".format(h, m, s)
+from slm.io.reporter import _fmt_timestamp
 
 
 def make_display_fn(mode: str, db_min: float = 40.0, db_max: float = 120.0,

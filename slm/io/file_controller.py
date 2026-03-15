@@ -5,7 +5,7 @@ from typing import Generator
 import numpy as np
 import soundfile as sf
 
-from slm.controller import Controller
+from slm.io.controller import Controller
 
 
 class FileController(Controller):
@@ -37,7 +37,6 @@ class FileController(Controller):
             raise RuntimeError("File has not been finished.")
         self._done = False
 
-        self._filename = filename
         if not isinstance(filename, str):
             filename = str(filename)
 
@@ -60,9 +59,9 @@ class FileController(Controller):
             self._next_block_time += self._blocksize / self._sf.samplerate
         try:
             return next(self._stream), next(self._counter)
-        except StopIteration as e:
+        except StopIteration:
             self._done = True
-            raise e
+            raise
 
     def calibrate(self, target_spl=94.0):
         raise NotImplementedError()

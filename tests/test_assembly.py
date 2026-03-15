@@ -10,14 +10,14 @@ import soundfile as sf
 
 from slm.assembly import MetricSpec, parse_metric, build_chain
 from slm.engine import Engine
-from slm.file_controller import FileController
+from slm.io.file_controller import FileController
 from slm.meter import (
     LeqAccumulator, LeqMovingMeter, MaxAccumulator, MinAccumulator,
     LEAccumulator, LEMovingMeter, LastAccumulatingMeter,
 )
 from slm.octave_band import PluginOctaveBand
 from slm.time_weighting import PluginFastTimeWeighting, PluginSquare
-from slm.reporter import Reporter
+from slm.io.reporter import Reporter
 
 
 # ---------------------------------------------------------------------------
@@ -384,8 +384,8 @@ class TestAssemblyNumerical:
 
     def _run(self, meas, metric_names, blocksize=1024):
         """Build chain via assembly, run, return final report row as dict."""
-        from slm.config import SLMConfig
-        from slm.cli import run_measurement
+        from slm.app.config import SLMConfig
+        from slm.app.cli import run_measurement
 
         with tempfile.TemporaryDirectory() as td:
             out = str(Path(td) / "result")
@@ -458,18 +458,18 @@ class TestAssemblyNumerical:
 class TestSensitivityHelpers:
 
     def test_fs_db_formula(self):
-        from slm.cli import sensitivity_from_fs_db
+        from slm.app.cli import sensitivity_from_fs_db
         from slm.constants import REFERENCE_PRESSURE
         fs_db = 128.1
         expected = 1.0 / (10 ** (fs_db / 20) * REFERENCE_PRESSURE)
         assert sensitivity_from_fs_db(fs_db) == pytest.approx(expected, rel=1e-10)
 
     def test_mv_conversion(self):
-        from slm.cli import sensitivity_from_mv
+        from slm.app.cli import sensitivity_from_mv
         assert sensitivity_from_mv(50.0) == pytest.approx(0.05, rel=1e-10)
 
     def test_dbv_conversion(self):
-        from slm.cli import sensitivity_from_dbv
+        from slm.app.cli import sensitivity_from_dbv
         # 0 dBV → 1.0 V
         assert sensitivity_from_dbv(0.0) == pytest.approx(1.0, rel=1e-10)
         # -20 dBV → 0.1 V

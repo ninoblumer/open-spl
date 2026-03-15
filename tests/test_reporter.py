@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from slm.reporter import Reporter
+from slm.io.reporter import Reporter, _fmt_timestamp
 
 
 # ---------------------------------------------------------------------------
@@ -34,20 +34,16 @@ def _td(seconds: float) -> timedelta:
 class TestFmtTimestamp:
 
     def test_zero(self):
-        r = Reporter()
-        assert r._fmt_timestamp(_td(0)) == "00:00:00.000"
+        assert _fmt_timestamp(_td(0)) == "00:00:00.000"
 
     def test_sub_minute(self):
-        r = Reporter()
-        assert r._fmt_timestamp(_td(5.5)) == "00:00:05.500"
+        assert _fmt_timestamp(_td(5.5)) == "00:00:05.500"
 
     def test_over_one_minute(self):
-        r = Reporter()
-        assert r._fmt_timestamp(_td(75.25)) == "00:01:15.250"
+        assert _fmt_timestamp(_td(75.25)) == "00:01:15.250"
 
     def test_over_one_hour(self):
-        r = Reporter()
-        assert r._fmt_timestamp(_td(3661.0)) == "01:01:01.000"
+        assert _fmt_timestamp(_td(3661.0)) == "01:01:01.000"
 
 
 # ---------------------------------------------------------------------------
@@ -98,12 +94,12 @@ class TestRecordThrottling:
         r.record(_td(1.0), dt=1.0)  # 1.0 - 0.0 = 1.0, not < 1.0 → records
         assert len(r._broadband_rows) == 1
 
-    def test_first_call_skipped_when_below_dt(self):
+    def test_first_call_always_recorded(self):
         r = Reporter()
         p = _plugin(1, np.array([94.0]))
         r.add_column("LAF", p, "LAF")
-        r.record(_td(0.5), dt=1.0)  # 0.5 < 1.0 → skipped
-        assert len(r._broadband_rows) == 0
+        r.record(_td(0.5), dt=1.0)  # first call always records regardless of elapsed time
+        assert len(r._broadband_rows) == 1
 
     def test_second_call_before_dt_skipped(self):
         r = Reporter()
