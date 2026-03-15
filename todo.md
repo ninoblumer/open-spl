@@ -4,6 +4,7 @@
 - [ ] #2 **Real-time audio controller** — no soundcard/JACK/ALSA controller. `calibrate()` raises `NotImplementedError` everywhere.
 - [ ] #5 **README.md** — update to reflect current architecture (Engine, Bus, Reporter, plugins, meters)
 - [ ] #6 **LICENSE** — add/update license file
+- [ ] #20 **Add `__init__.py` re-exports for `slm/io/` and `slm/app/`** — flatten public API so callers can use e.g. `from slm.io import FileController` instead of the full submodule path
 - [ ] #18 **Test conformance with standards IEC 61260 and IEC 61672** — requirements summarized in `notes/SLM_Conformance_Test_Report.md`
 
 ## Optional

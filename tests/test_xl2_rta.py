@@ -12,7 +12,7 @@ attenuation at low bands, but measurement shows no systematic HPF pattern.
 import numpy as np
 
 from slm.engine import Engine
-from slm.file_controller import FileController
+from slm.io.file_controller import FileController
 from slm.frequency_weighting import PluginZWeighting
 from slm.octave_band import PluginOctaveBand
 

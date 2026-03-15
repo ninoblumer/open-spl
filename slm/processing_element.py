@@ -3,8 +3,6 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from slm.controller import Controller
-
 
 class ProcessingElement(ABC):
     samplerate: int

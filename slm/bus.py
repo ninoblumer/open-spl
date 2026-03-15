@@ -1,5 +1,4 @@
 from __future__ import annotations
-import itertools
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -32,8 +31,6 @@ class Bus(ProcessingElement):
         self.engine = engine
         self.name = name
         self.plugins = []
-        self.meters = []
-        # self._counter = itertools.count(1)  # for numbering plugins with unique id
         self.block = np.zeros((1, self.blocksize))
 
         if frequency_weighting is None:
@@ -46,10 +43,6 @@ class Bus(ProcessingElement):
 
     def get(self) -> np.ndarray:
         return self.block
-
-    def create_plugin(self, ptype: type[TPlugin], **kwargs) -> TPlugin:
-        plugin = ptype(id=f"{self.name}{next(self._counter)}", bus=self, **kwargs)
-        return self.add_plugin(plugin)
 
     def add_plugin(self, plugin: TPlugin) -> TPlugin:
         if plugin.bus != self:

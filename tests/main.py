@@ -1,11 +1,11 @@
 from slm.meter import LastMovingMeter, MaxMovingMeter, MaxAccumulator
 from slm.plugin_meter import PluginMeter
-from slm.reporter import Reporter
+from slm.io.reporter import Reporter
 from util.xl2 import XL2_SLM_Measurement
 from pathlib import Path
 
 from slm.engine import Engine
-from slm.file_controller import FileController
+from slm.io.file_controller import FileController
 from slm.octave_band import PluginOctaveBand
 from slm.constants import REFERENCE_PRESSURE
 

@@ -67,7 +67,7 @@ class PluginZWeighting(PluginFrequencyWeighting):
     def __init__(self, **kwargs):
         super().__init__(curve='Z', **kwargs)
 
-    def _compute_filter(self, zero_zi:bool=False):
+    def _compute_filter(self):
         self._wf = None
         self._zi = None
 

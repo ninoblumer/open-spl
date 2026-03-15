@@ -21,7 +21,7 @@ import pytest
 from functools import partial
 
 from slm.engine import Engine
-from slm.file_controller import FileController
+from slm.io.file_controller import FileController
 from slm.frequency_weighting import PluginAWeighting, PluginCWeighting, PluginHPF
 from slm.meter import LeqAccumulator, MaxAccumulator
 from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting, PluginSquare
