@@ -5,12 +5,16 @@
 - [ ] #5 **README.md** — update to reflect current architecture (Engine, Bus, Reporter, plugins, meters)
 - [ ] #6 **LICENSE** — add/update license file
 - [ ] #20 **Add `__init__.py` re-exports for `slm/io/` and `slm/app/`** — flatten public API so callers can use e.g. `from slm.io import FileController` instead of the full submodule path
-- [ ] #18 **Test conformance with standards IEC 61260 and IEC 61672** — requirements summarized in `notes/SLM_Conformance_Test_Report.md`
+- [ ] #21 **Redo calibration routine** — `cal_freq` and `cal_level` should be arguments; apply a flat-top bandpass filter around `cal_freq` before computing RMS, so only the calibrator tone contributes to the sensitivity estimate.
+- [ ] #22 **tidy up tests/ folder** - add sub folders and group tests together
+- [ ] #24 **conformance tests should record how "well" they passed** - remove conformance_report.py and let the tests do that themselves
 
 ## Optional
 - [ ] #17 **FFT-based A-weighting (optional improvement)** — replace the bilinear-transform IIR in `PluginAWeighting` with a frequency-domain analytical A-weighting to reduce broadband LAeq error from −0.17 dB to ±0.05 dB vs XL2. Requires overlap-add block processing; incompatible with current real-time time-weighted plugins (LASmax etc.) on the same bus without a parallel path. Pre-requisite: split the bus into a Leq-only FFT path and a time-weighting IIR path.
-
+- [ ] #23 **use different filter for frequency-weighting** - use different design method (pre-warping, impulse invariance or so)
+- 
 ## Done
+- [x] #18 **Test conformance with standards IEC 61260 and IEC 61672** — requirements summarized in `notes/SLM_Conformance_Test_Report.md`
 - [x] #4 **XL2 parser: missing Time section** — `_SectionTime` added to `util/xl2.py`; parses `Start`/`End` as `datetime` objects in all file types that carry `# Time` (123_Log, RTA_3rd_Log, RTA_3rd_Report, RTA_Oct_Log, RTA_Oct_Report); 6 new tests in `tests/test_xl2_parser.py`; 190 tests pass.
 - [x] #19 **Implement LE** (exposure level) — `LEAccumulator` + `LEMovingMeter` in `slm/meter.py`; parser/builder extended in `slm/assembly.py` (`LAE`, `LCE`, `LZE`, window/band variants); engine end-of-file snapshot fix; 184 tests pass.
 - [x] #1 **Declarative measurement configuration** — `slm/assembly.py` (`parse_metric`, `build_chain`), `slm/config.py` (`SLMConfig` + TOML I/O), `slm/cli.py` (sensitivity helpers, calibration, `run_measurement`, `SLMShell`), `slm/__main__.py` (`python -m slm`). 154 tests pass.
