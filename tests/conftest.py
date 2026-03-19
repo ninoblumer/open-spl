@@ -100,6 +100,11 @@ class XL2Measurement:
 # Session-scoped fixtures — one per XL2 measurement set                       #
 # --------------------------------------------------------------------------- #
 
+@pytest.fixture
+def report() -> bool:
+    return False
+
+
 @pytest.fixture(scope="session")
 def meas_000():
     """SLM_000: 10 s, 1 kHz calibrator tone at 94 dB."""

@@ -98,8 +98,12 @@ class TestFastTimeWeightingDecayRate:
     CL1_LO   = 31.0
     CL1_HI   = 38.5
 
-    def test_decay_rate_4khz(self):
+    def test_decay_rate_4khz(self, report: bool = False):
         rate = _measure_decay_rate_dbs(PluginFastTimeWeighting, freq_hz=4000)
+        margin = min(rate - self.CL1_LO, self.CL1_HI - rate)
+        if report:
+            return {"label": "F @ 4 kHz", "rate": rate,
+                    "limit_lo": self.CL1_LO, "limit_hi": self.CL1_HI, "margin": margin}
         assert self.CL1_LO <= rate <= self.CL1_HI, (
             f"F decay rate = {rate:.2f} dB/s "
             f"(goal {self.GOAL_DBS}, class 1: [{self.CL1_LO}, {self.CL1_HI}] dB/s)"
@@ -114,8 +118,12 @@ class TestSlowTimeWeightingDecayRate:
     CL1_LO   = 3.6
     CL1_HI   = 5.1
 
-    def test_decay_rate_4khz(self):
+    def test_decay_rate_4khz(self, report: bool = False):
         rate = _measure_decay_rate_dbs(PluginSlowTimeWeighting, freq_hz=4000)
+        margin = min(rate - self.CL1_LO, self.CL1_HI - rate)
+        if report:
+            return {"label": "S @ 4 kHz", "rate": rate,
+                    "limit_lo": self.CL1_LO, "limit_hi": self.CL1_HI, "margin": margin}
         assert self.CL1_LO <= rate <= self.CL1_HI, (
             f"S decay rate = {rate:.2f} dB/s "
             f"(goal {self.GOAL_DBS}, class 1: [{self.CL1_LO}, {self.CL1_HI}] dB/s)"

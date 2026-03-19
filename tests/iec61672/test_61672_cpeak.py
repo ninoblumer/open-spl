@@ -136,10 +136,14 @@ class TestCWeightedPeak:
     """IEC 61672-1 §5.13 — L_Cpeak − L_C vs Table 5, class 1."""
 
     @pytest.mark.parametrize("row", _TABLE5, ids=_TABLE5_IDS)
-    def test_cpeak_minus_lc(self, row):
+    def test_cpeak_minus_lc(self, row, report: bool = False):
         sig_type, freq_hz, ref_diff, cl1_lo, cl1_hi = row
         diff = _cpeak_minus_lc(freq_hz, sig_type)
         dev  = diff - ref_diff
+        margin = min(dev - cl1_lo, cl1_hi - dev)
+        if report:
+            return {"label": f"{sig_type} @ {freq_hz} Hz", "deviation": dev,
+                    "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         assert cl1_lo <= dev <= cl1_hi, (
             f"{sig_type} @ {freq_hz} Hz: "
             f"L_Cpeak − L_C = {diff:.3f} dB, ref = {ref_diff:.1f} dB, "

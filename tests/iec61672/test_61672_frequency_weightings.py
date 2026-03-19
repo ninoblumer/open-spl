@@ -124,10 +124,14 @@ class TestAWeightingClass1:
     """IEC 61672-1 §5.5 — A-weighting frequency response, class 1 limits."""
 
     @pytest.mark.parametrize("row", _TABLE3, ids=_TABLE3_IDS)
-    def test_gain_within_class1(self, row):
+    def test_gain_within_class1(self, row, report: bool = False):
         freq_hz, a_goal, _c, cl1_lo, cl1_hi = row
         gain = _measure_gain_db(PluginAWeighting, freq_hz)
         dev = gain - a_goal
+        margin = (cl1_hi - dev) if cl1_lo is None else min(dev - cl1_lo, cl1_hi - dev)
+        if report:
+            return {"label": f"{freq_hz} Hz", "deviation": dev,
+                    "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         if cl1_lo is not None:
             assert dev >= cl1_lo, (
                 f"A @ {freq_hz} Hz: gain={gain:.3f} dB, goal={a_goal:.1f} dB, "
@@ -143,10 +147,14 @@ class TestCWeightingClass1:
     """IEC 61672-1 §5.5 — C-weighting frequency response, class 1 limits."""
 
     @pytest.mark.parametrize("row", _TABLE3, ids=_TABLE3_IDS)
-    def test_gain_within_class1(self, row):
+    def test_gain_within_class1(self, row, report: bool = False):
         freq_hz, _a, c_goal, cl1_lo, cl1_hi = row
         gain = _measure_gain_db(PluginCWeighting, freq_hz)
         dev = gain - c_goal
+        margin = (cl1_hi - dev) if cl1_lo is None else min(dev - cl1_lo, cl1_hi - dev)
+        if report:
+            return {"label": f"{freq_hz} Hz", "deviation": dev,
+                    "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         if cl1_lo is not None:
             assert dev >= cl1_lo, (
                 f"C @ {freq_hz} Hz: gain={gain:.3f} dB, goal={c_goal:.1f} dB, "
@@ -162,9 +170,14 @@ class TestZWeightingFlat:
     """IEC 61672-1 Annex E.5 — Z-weighting is a flat passthrough (0 dB)."""
 
     @pytest.mark.parametrize("row", _TABLE3, ids=_TABLE3_IDS)
-    def test_gain_is_zero(self, row):
+    def test_gain_is_zero(self, row, report: bool = False):
         freq_hz = row[0]
         gain = _measure_gain_db(PluginZWeighting, freq_hz)
+        cl1_lo, cl1_hi = -0.1, +0.1
+        margin = min(gain - cl1_lo, cl1_hi - gain)
+        if report:
+            return {"label": f"{freq_hz} Hz", "deviation": gain,
+                    "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         assert abs(gain) <= 0.1, (
             f"Z @ {freq_hz} Hz: gain={gain:.4f} dB (expected 0.0 ± 0.1 dB)"
         )
