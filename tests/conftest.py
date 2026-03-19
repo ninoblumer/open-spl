@@ -5,6 +5,31 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+
+# ---------------------------------------------------------------------------
+# Slow-test opt-in
+# ---------------------------------------------------------------------------
+# Tests marked @pytest.mark.slow are skipped by default.
+# Run them with:  pytest --slow
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--slow", action="store_true", default=False,
+        help="run slow tests (skipped by default)",
+    )
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow (skipped unless --slow is passed)",
+    )
+
+def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--slow"):
+        skip_slow = pytest.mark.skip(reason="slow test — pass --slow to run")
+        for item in items:
+            if "slow" in item.keywords:
+                item.add_marker(skip_slow)
+
 from util.xl2 import XL2_SLM_File
 from slm.constants import REFERENCE_PRESSURE
 
