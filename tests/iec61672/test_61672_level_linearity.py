@@ -93,23 +93,32 @@ def _get_sweep():
 class TestLevelLinearityTotalRange:
     """IEC 61672-1 §5.6 — total-range linearity deviation ≤ ±0.8 dB, class 1."""
 
-    def test_residuals_within_08dB(self):
+    def test_residuals_within_08dB(self, report: bool = False):
         l_in, l_meas = _get_sweep()
 
         # Best-fit line (slope should be ~1.0, intercept ~ A-weighting gain at 1 kHz).
         slope, intercept = np.polyfit(l_in, l_meas, 1)
         residuals = l_meas - (slope * l_in + intercept)
 
-        worst = np.max(np.abs(residuals))
+        worst = float(np.max(np.abs(residuals)))
+        margin = 0.8 - worst
+        if report:
+            worst_level = float(l_in[np.argmax(np.abs(residuals))])
+            return {"label": "max residual", "value": worst, "limit": 0.8,
+                    "margin": margin, "note": f"worst @ {worst_level:.0f} dB SPL"}
         assert worst <= 0.8, (
             f"Max linearity deviation = {worst:.4f} dB (class 1 limit: ±0.8 dB)\n"
             f"Worst level: {l_in[np.argmax(np.abs(residuals))]:.0f} dB SPL"
         )
 
-    def test_slope_is_unity(self):
+    def test_slope_is_unity(self, report: bool = False):
         """Measured level must change 1 dB per 1 dB input change (slope = 1)."""
         l_in, l_meas = _get_sweep()
         slope, _ = np.polyfit(l_in, l_meas, 1)
+        margin = 0.01 - abs(slope - 1.0)
+        if report:
+            return {"label": "slope deviation", "value": abs(slope - 1.0), "limit": 0.01,
+                    "margin": margin, "note": f"slope = {slope:.6f}"}
         assert abs(slope - 1.0) <= 0.01, (
             f"Regression slope = {slope:.6f} (expected 1.0 ± 0.01)"
         )
@@ -118,14 +127,20 @@ class TestLevelLinearityTotalRange:
 class TestLevelLinearityIncremental:
     """IEC 61672-1 §5.6 — any 1–10 dB input step → same output change ± 0.3 dB."""
 
-    def test_1dB_steps(self):
+    def test_1dB_steps(self, report: bool = False):
         """Consecutive 1 dB input increments must produce 1 dB output increments ± 0.3 dB."""
         l_in, l_meas = _get_sweep()
         delta_in   = np.diff(l_in)    # all 1.0 dB
         delta_meas = np.diff(l_meas)
         deviations = delta_meas - delta_in
 
-        worst = np.max(np.abs(deviations))
+        worst = float(np.max(np.abs(deviations)))
+        margin = 0.3 - worst
+        if report:
+            worst_idx = int(np.argmax(np.abs(deviations)))
+            return {"label": "1 dB step deviation", "value": worst, "limit": 0.3,
+                    "margin": margin,
+                    "note": f"worst at {l_in[worst_idx]:.0f}->{l_in[worst_idx+1]:.0f} dB SPL"}
         assert worst <= 0.3, (
             f"Max 1 dB-step deviation = {worst:.4f} dB (class 1 limit: ±0.3 dB)\n"
             f"Worst at input {l_in[np.argmax(np.abs(deviations))]:.0f} → "

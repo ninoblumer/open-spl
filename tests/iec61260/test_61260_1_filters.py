@@ -280,11 +280,15 @@ class TestOctaveRelativeAttenuation:
     """
 
     @pytest.mark.parametrize("row", _PB_PARAMS, ids=_PB_IDS)
-    def test_passband(self, row: tuple) -> None:
+    def test_passband(self, row: tuple, report: bool = False) -> None:
         """Interior pass-band: lo ≤ ΔA(Ω) ≤ hi (dB)."""
         band_idx, f_m, exp, lo, hi = row
         _, sos_list = _get_filterbank()
         da = _delta_A(sos_list[band_idx], f_m, exp, SAMPLERATE)
+        margin = min(da - lo, hi - da)
+        if report:
+            return {"label": f"{int(round(f_m))} Hz G^{exp:+.3f}", "deviation": da,
+                    "limit_lo": lo, "limit_hi": hi, "margin": margin}
         assert lo <= da <= hi, (
             f"Band {f_m:.1f} Hz @ Ω=G^{exp:+.3f} "
             f"(f={f_m * G**exp:.1f} Hz): "
@@ -292,11 +296,15 @@ class TestOctaveRelativeAttenuation:
         )
 
     @pytest.mark.parametrize("row", _SB_PARAMS, ids=_SB_IDS)
-    def test_stopband(self, row: tuple) -> None:
+    def test_stopband(self, row: tuple, report: bool = False) -> None:
         """Stop-band: ΔA(Ω) ≥ minimum attenuation (dB)."""
         band_idx, f_m, exp, min_da = row
         _, sos_list = _get_filterbank()
         da = _delta_A(sos_list[band_idx], f_m, exp, SAMPLERATE)
+        margin = da - min_da
+        if report:
+            return {"label": f"{int(round(f_m))} Hz G^{exp:+d}", "deviation": da,
+                    "limit_lo": min_da, "limit_hi": None, "margin": margin}
         assert da >= min_da, (
             f"Band {f_m:.1f} Hz @ Ω=G^{exp:+d} "
             f"(f={f_m * G**exp:.1f} Hz): "
@@ -316,10 +324,15 @@ class TestOctaveEffectiveBandwidth:
     """
 
     @pytest.mark.parametrize("band_idx", range(8), ids=_BAND_IDS)
-    def test_bandwidth_deviation(self, band_idx: int) -> None:
+    def test_bandwidth_deviation(self, band_idx: int, report: bool = False) -> None:
         centers, sos_list = _get_filterbank()
         f_m = centers[band_idx]
         db  = _effective_bw_deviation(sos_list[band_idx], f_m, SAMPLERATE)
+        margin = DELTA_B_LIMIT_CL1 - abs(db)
+        if report:
+            return {"label": f"{int(round(f_m))} Hz", "deviation": db,
+                    "limit_lo": -DELTA_B_LIMIT_CL1, "limit_hi": DELTA_B_LIMIT_CL1,
+                    "margin": margin}
         assert abs(db) <= DELTA_B_LIMIT_CL1, (
             f"Band {f_m:.1f} Hz: ΔB = {db:+.4f} dB "
             f"(class 1 limit: ±{DELTA_B_LIMIT_CL1} dB)"

@@ -136,10 +136,14 @@ class TestFmaxToneburst:
     """IEC 61672-1 §5.9 — F-time-weighted maximum toneburst response, class 1."""
 
     @pytest.mark.parametrize("row", _TABLE4, ids=_TABLE4_IDS)
-    def test_fmax_vs_table4(self, row):
+    def test_fmax_vs_table4(self, row, report: bool = False):
         burst_ms, ref_fmax, _ref_sel, cl1_lo, cl1_hi = row
         delta_fmax, _ = _toneburst_response(burst_ms / 1000.0)
         dev = delta_fmax - ref_fmax
+        margin = min(dev - cl1_lo, cl1_hi - dev)
+        if report:
+            return {"label": f"{burst_ms} ms", "deviation": dev,
+                    "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         assert cl1_lo <= dev <= cl1_hi, (
             f"F-max @ {burst_ms} ms: δ = {delta_fmax:.3f} dB, "
             f"ref = {ref_fmax:.1f} dB, dev = {dev:+.3f} dB "
@@ -151,10 +155,14 @@ class TestSELToneburst:
     """IEC 61672-1 §5.9 — sound exposure level toneburst response, class 1."""
 
     @pytest.mark.parametrize("row", _TABLE4, ids=_TABLE4_IDS)
-    def test_sel_vs_table4(self, row):
+    def test_sel_vs_table4(self, row, report: bool = False):
         burst_ms, _ref_fmax, ref_sel, cl1_lo, cl1_hi = row
         _, delta_sel = _toneburst_response(burst_ms / 1000.0)
         dev = delta_sel - ref_sel
+        margin = min(dev - cl1_lo, cl1_hi - dev)
+        if report:
+            return {"label": f"{burst_ms} ms", "deviation": dev,
+                    "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         assert cl1_lo <= dev <= cl1_hi, (
             f"SEL @ {burst_ms} ms: δ = {delta_sel:.3f} dB, "
             f"ref = {ref_sel:.1f} dB, dev = {dev:+.3f} dB "
