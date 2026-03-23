@@ -12,7 +12,7 @@ Interactive REPL with pre-populated state (combine -i with other flags)::
 
 Calibration (derive sensitivity from a calibrator-tone recording)::
 
-    python -m slm --calibrate --file PATH [--cal-level DB]
+    python -m slm --calibrate --file PATH [--cal-level DB] [--cal-freq HZ]
 
 One-shot measurement::
 
@@ -43,6 +43,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cal-level", type=float, default=94.0, metavar="DB",
         help="Calibrator level in dB SPL (default: 94.0)",
+    )
+    parser.add_argument(
+        "--cal-freq", type=float, default=1000.0, metavar="HZ",
+        help="Calibrator tone frequency in Hz (default: 1000.0)",
     )
     parser.add_argument(
         "--measure", nargs="+", metavar="METRIC",
@@ -144,9 +148,9 @@ def main() -> None:
             parser.error("--calibrate requires --file")
         if _resolve_sensitivity(args) is not None:
             parser.error("--calibrate cannot be combined with a sensitivity flag")
-        from slm.app.cli import calibrate_sensitivity
-        sens = calibrate_sensitivity(args.file, cal_level=args.cal_level)
-        print(f"Sensitivity: {sens:.6g} V")
+        from slm.app.cli import calibrate_from_file, _fmt_sensitivity
+        sens = calibrate_from_file(args.file, cal_freq=args.cal_freq, cal_level=args.cal_level)
+        print(f"Sensitivity: {_fmt_sensitivity(sens)}")
         return
 
     # ------------------------------------------------------------------ #

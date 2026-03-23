@@ -47,34 +47,26 @@ def _fmt_sensitivity(sens_v: float) -> str:
 # Calibration
 # ---------------------------------------------------------------------------
 
-def calibrate_sensitivity(
+def calibrate_from_file(
     wav_path: str | Path,
+    cal_freq: float = 1000.0,
     cal_level: float = 94.0,
     blocksize: int = 1024,
 ) -> float:
     """Derive controller sensitivity from a calibrator-tone WAV recording.
 
-    The calibrator is assumed to emit *cal_level* dB SPL.  Returns a value
-    suitable for ``controller.set_sensitivity(result, unit="V")``.
+    Creates a FileController, sets a unity sensitivity, then delegates to
+    ``slm.calibration.calibrate_sensitivity`` which applies a bandpass filter
+    at *cal_freq* so only the fundamental tone contributes to the estimate.
+
+    Returns a value suitable for ``controller.set_sensitivity(result, unit="V")``.
     """
     from slm.io.file_controller import FileController
-    from slm.engine import Engine
-    from slm.frequency_weighting import PluginZWeighting
-    from slm.meter import LeqAccumulator
+    from slm.calibration import calibrate_sensitivity
 
     controller = FileController(str(wav_path), blocksize=blocksize)
     controller.set_sensitivity(1.0, unit="V")   # dummy — just need raw WAV values
-
-    engine = Engine(controller, dt=1e9)         # dt=1e9 → reporter never fires
-    bus = engine.add_bus("Z", PluginZWeighting)
-    freq_w = bus.frequency_weighting
-    freq_w.create_meter(LeqAccumulator, name="leq")
-
-    engine.run()
-
-    mean_sq = freq_w.read_lin("leq")[0]         # mean(s²) over the whole file
-    rms = mean_sq ** 0.5
-    return rms / (REFERENCE_PRESSURE * 10 ** (cal_level / 20))
+    return calibrate_sensitivity(controller, cal_freq=cal_freq, cal_level=cal_level)
 
 
 # ---------------------------------------------------------------------------
@@ -261,9 +253,10 @@ Units:
         print(f"  Sensitivity: {_fmt_sensitivity(self._sensitivity_v)}")
 
     def do_calibrate(self, arg: str) -> None:
-        """calibrate [LEVEL_DB] — derive controller sensitivity from a calibrator-tone WAV.
+        """calibrate [LEVEL_DB [FREQ_HZ]] — derive sensitivity from a calibrator-tone WAV.
 
-Runs the engine on the currently-set WAV file, treating the signal as a
+Runs the engine on the currently-set WAV file, applying a 1/3-octave bandpass
+filter at FREQ_HZ (default 1000.0 Hz) and treating the filtered signal as a
 pure calibrator tone at LEVEL_DB (default 94.0 dB SPL).
 
 The returned sensitivity is the controller sensitivity in V/Pa — NOT the
@@ -276,14 +269,22 @@ Use this when you have a physical calibrator and a recording of it; use
             print("No file set.  Use: file PATH")
             return
         cal_level = 94.0
-        if arg.strip():
+        cal_freq = 1000.0
+        parts = arg.split()
+        if len(parts) >= 1:
             try:
-                cal_level = float(arg.strip())
+                cal_level = float(parts[0])
             except ValueError:
-                print(f"Invalid calibration level: {arg.strip()!r}")
+                print(f"Invalid calibration level: {parts[0]!r}")
                 return
-        print(f"Calibrating against {cal_level} dB SPL ...")
-        sens = calibrate_sensitivity(self._wav_path, cal_level=cal_level)
+        if len(parts) >= 2:
+            try:
+                cal_freq = float(parts[1])
+            except ValueError:
+                print(f"Invalid calibration frequency: {parts[1]!r}")
+                return
+        print(f"Calibrating against {cal_level} dB SPL at {cal_freq} Hz ...")
+        sens = calibrate_from_file(self._wav_path, cal_freq=cal_freq, cal_level=cal_level)
         print(f"  Sensitivity: {_fmt_sensitivity(sens)}")
         try:
             answer = input("Set as current sensitivity? [Y/n]: ").strip().lower()

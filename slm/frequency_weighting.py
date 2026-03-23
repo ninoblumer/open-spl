@@ -106,3 +106,35 @@ class PluginHPF(PluginMeter):
 
     def to_str(self):
         return f"PluginHPF(fc={self.fc}, order={self.order})"
+
+
+class PluginBandpass(PluginMeter):
+    """Narrow Butterworth bandpass filter (1/3-octave bandwidth around fc)."""
+
+    def __init__(self, *, fc: float, order: int = 2, zero_zi: bool = True, **kwargs):
+        super().__init__(**kwargs)
+        self.fc = fc
+        self.order = order
+        self.output = np.zeros((1, self.blocksize))
+        self._zero_zi = zero_zi
+        self._compute_filter()
+
+    def reset(self):
+        super().reset()
+        self._compute_filter()
+
+    def _compute_filter(self):
+        factor = 2 ** (1 / 6)
+        sos = butter(self.order, [self.fc / factor, self.fc * factor],
+                     btype='bandpass', fs=self.samplerate, output='sos')
+        self._sos = sos
+        zi = sosfilt_zi(sos)
+        self._zi = np.reshape(zi, (zi.shape[0], 1, zi.shape[1]))
+        if self._zero_zi:
+            self._zi = np.zeros_like(self._zi)
+
+    def func(self, block: np.ndarray):
+        self.output[0, :], self._zi[:, :] = sosfilt(self._sos, block, zi=self._zi)
+
+    def to_str(self):
+        return f"PluginBandpass(fc={self.fc}, order={self.order})"
