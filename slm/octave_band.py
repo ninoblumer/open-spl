@@ -68,8 +68,9 @@ class PluginOctaveBand(PluginMeter):
         self.output = np.zeros((self.n_bands, self.blocksize))
 
     def func(self, block: np.ndarray):
-        spl_array, _, signals = self._filter_bank.filter(block, sigbands=True, detrend=False)
-        self.output[:, :] = np.vstack(signals)
+        _, _, signals = self._filter_bank.filter(block, sigbands=True, detrend=False, calculate_level=False)
+        for i, sig in enumerate(signals):
+            self.output[i, :] = sig
 
     def to_str(self):
         return f"{type(self).__name__}"

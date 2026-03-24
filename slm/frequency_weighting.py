@@ -72,7 +72,7 @@ class PluginZWeighting(PluginFrequencyWeighting):
         self._zi = None
 
     def func(self, block: np.ndarray):
-        self.output[0,:] = block.copy()
+        self.output[0, :] = block
 
     def to_str(self):
         return "PluginZWeighting()"
