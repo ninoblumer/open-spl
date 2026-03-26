@@ -1,8 +1,7 @@
 # Todo
 
 ## Open
-- [ ] #27 **Streamline Engine construction** — `Engine.__init__` should accept `Reporter` directly (or `reporter_kwargs`) so callers don't need to manually create a `Reporter` and assign `engine.reporter = reporter` as a second step; update `run_measurement`/`run_realtime_measurement` and README accordingly.
-- [ ] #26 **Support arbitrary octave divisions in the CLI/metric syntax** — extend `parse_metric` regex and `MetricSpec` to accept any `N/M` fraction (e.g. `1/6`, `1/12`, `2/3`) in the `:bands:` suffix, not just `1/3`; update `build_chain` and README accordingly.
+- [ ] #28 **Rename the project** — choose a new name; update `pyproject.toml` (`name`), `README.md`, `LICENSE` copyright header, repo name, and any other references.
 
 ## Optional
 - [ ] #17 **FFT-based A-weighting (optional improvement)** — replace the bilinear-transform IIR in `PluginAWeighting` with a frequency-domain analytical A-weighting to reduce broadband LAeq error from −0.17 dB to ±0.05 dB vs XL2. Requires overlap-add block processing; incompatible with current real-time time-weighted plugins (LASmax etc.) on the same bus without a parallel path. Pre-requisite: split the bus into a Leq-only FFT path and a time-weighting IIR path.
@@ -10,6 +9,8 @@
 - [ ] #25 **Discoverable output device** — make the SLM appear as a connectable audio sink so other software can route audio to it without a hardware loopback. On Linux/macOS: `JackController` (JACK client with named input ports; works transparently with PipeWire on modern Linux). On Windows: not reliably feasible without a third-party virtual audio cable driver.
 
 ## Done
+- [x] #26 **Support arbitrary octave divisions in the CLI/metric syntax** — `_PATTERN` regex generalised to `N/M`; `bands_per_oct = den/num`; 3 new valid + 1 invalid parse tests; README updated; 533 tests pass.
+- [x] #27 **Streamline Engine construction** — `Engine` defaults to `Reporter()`; accepts `reporter=` kwarg; `build_chain` no longer takes a reporter arg; 529 tests pass.
 - [x] #5 **README.md** — full rewrite: installation, usage, metric syntax, calibration, architecture, Python API; `pip install --user git+…` hint added.
 - [x] #6 **LICENSE** — replaced acoustic-toolbox BSD with GPL v3 + copyright header; added NOTICE with reproduced BSD/MIT notices for numpy, scipy, soundfile, sounddevice; GPL notice in SLMShell intro.
 - [x] #20 **Add `__init__.py` re-exports for `slm/io/`, `slm/app/`, and `slm/`** — flat public API; `sounddevice` made optional with graceful degradation; 529 tests pass.

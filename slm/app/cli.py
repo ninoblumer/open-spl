@@ -157,12 +157,11 @@ def run_measurement(
     controller = FileController(str(wav_path), blocksize=blocksize, realtime=realtime)
     controller.set_sensitivity(sensitivity_v, unit="V")
 
-    engine = Engine(controller, dt=config.dt)
     display_fn = make_display_fn(display_mode, precision=2) if print_to_console else None
     reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
-    engine.reporter = reporter
+    engine = Engine(controller, dt=config.dt, reporter=reporter)
 
-    build_chain(specs, engine, reporter)
+    build_chain(specs, engine)
 
     try:
         engine.run()
@@ -206,12 +205,11 @@ def run_realtime_measurement(
     controller.set_sensitivity(sensitivity_v, unit="V")
     controller.start()
 
-    engine = Engine(controller, dt=config.dt)
     display_fn = make_display_fn(display_mode, precision=2) if print_to_console else None
     reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
-    engine.reporter = reporter
+    engine = Engine(controller, dt=config.dt, reporter=reporter)
 
-    build_chain(specs, engine, reporter)
+    build_chain(specs, engine)
 
     try:
         engine.run()

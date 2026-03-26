@@ -4,11 +4,11 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from slm.bus import Bus
+from slm.io.reporter import Reporter
 
 if TYPE_CHECKING:
     from slm.frequency_weighting import PluginFrequencyWeighting
     from slm.io.controller import Controller
-    from slm.io.reporter import Reporter
 
 
 class Engine:
@@ -17,11 +17,12 @@ class Engine:
     sensitivity: float = property(lambda self: self._controller.sensitivity)
     dt: float = property(lambda self: self._dt)
 
-    def __init__(self, controller, dt: float=0.1):
+    def __init__(self, controller, dt: float = 0.1,
+                 reporter: Reporter | None = None):
         self._controller: Controller = controller
         self._busses: dict[str, Bus] = dict()
         self._dt = dt
-        self.reporter: Reporter | None = None
+        self.reporter: Reporter = reporter or Reporter()
 
     def add_bus(self, name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None) -> Bus:
         bus = Bus(engine=self, name=name, frequency_weighting=frequency_weighting)
@@ -52,7 +53,7 @@ class Engine:
                 break
         # Force a final snapshot so the report always reflects the fully-accumulated state,
         # even when the file duration is not an exact multiple of dt.
-        if self.reporter is not None and self._last_timestamp is not None:
+        if self._last_timestamp is not None:
             self.reporter.record(self._last_timestamp, 0)
 
     def _process_block(self) -> None:
@@ -62,10 +63,9 @@ class Engine:
         for bus in self._busses.values():
             bus.process(block)
 
-        if self.reporter is not None:
-            timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
-            self._last_timestamp = timestamp
-            self.reporter.record(timestamp, self._dt)
+        timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
+        self._last_timestamp = timestamp
+        self.reporter.record(timestamp, self._dt)
 
     def stop(self):
         self._controller.stop()

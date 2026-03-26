@@ -103,12 +103,11 @@ def run(seconds: float, samplerate: int, blocksize: int):
           f"n_blocks={n_blocks} | {len(METRIC_NAMES)} metrics")
 
     controller = NoiseController(samplerate=samplerate, blocksize=blocksize, n_blocks=n_blocks)
-    engine = Engine(controller, dt=0.1)
     reporter = Reporter(precision=2)
-    engine.reporter = reporter
+    engine = Engine(controller, dt=0.1, reporter=reporter)
 
     specs = [parse_metric(m) for m in METRIC_NAMES]
-    build_chain(specs, engine, reporter)
+    build_chain(specs, engine)
 
     pr = cProfile.Profile()
     pr.enable()

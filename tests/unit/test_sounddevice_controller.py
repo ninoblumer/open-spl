@@ -242,10 +242,9 @@ class TestEngineIntegration:
                    return_value=fake):
             ctrl.start()
 
-            engine = Engine(ctrl, dt=0.1)
             reporter = Reporter(precision=2)
-            engine.reporter = reporter
-            build_chain([parse_metric("LAeq")], engine, reporter)
+            engine = Engine(ctrl, dt=0.1, reporter=reporter)
+            build_chain([parse_metric("LAeq")], engine)
 
             engine.run()   # stops when _FakeStream finishes and queue drains
 

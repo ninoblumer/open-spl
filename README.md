@@ -1,7 +1,7 @@
 # open-spl
 
 An IEC 61672-1 compliant Sound Level Meter (SLM) in Python. Measures LAeq, LCeq, LZeq,
-LASmax, LAFmax, octave-band levels (1/1 and 1/3), sound exposure levels (LE), and more —
+LASmax, LAFmax, octave-band levels (1/1, 1/3, 1/6, …), sound exposure levels (LE), and more —
 from WAV files or a live microphone.
 
 ---
@@ -79,7 +79,7 @@ python -m slm --device 0 --sensitivity-mv 50 --measure LAeq LAFmax --dt 1.0
 ## Metric name syntax
 
 ```
-L[ACZ][FSI?](eq|max|min|E)?[_(dt|Ns|Nm|Nh)][:bands:[1/3:]fmin-fmax]
+L[ACZ][FSI?](eq|max|min|E)?[_(dt|Ns|Nm|Nh)][:bands:[N/M:]fmin-fmax]
 ```
 
 ### Frequency weighting
@@ -124,9 +124,10 @@ L[ACZ][FSI?](eq|max|min|E)?[_(dt|Ns|Nm|Nh)][:bands:[1/3:]fmin-fmax]
 |--------|-------------|
 | `:bands:63-8000` | 1/1-octave bands, 63 Hz to 8 kHz |
 | `:bands:1/3:31-16000` | 1/3-octave bands, 31 Hz to 16 kHz |
+| `:bands:1/6:63-8000` | 1/6-octave bands, 63 Hz to 8 kHz |
+| `:bands:N/M:fmin-fmax` | Any N/M-octave filter bank (M/N bands per octave) |
 
-The metric syntax supports 1/1 and 1/3 octave bands. Any other fraction (1/6, 1/12, 2/3, …)
-is supported by `PluginOctaveBand(bands_per_oct=N)` directly but requires the low-level API.
+Omitting the `N/M:` fraction defaults to 1/1-octave.
 
 ### Examples
 
@@ -195,7 +196,7 @@ Reporter ◄──────────────────────�
 - **`Bus`** — one frequency weighting + a chain of downstream plugins and meters
 - **`PluginAWeighting` / `PluginCWeighting` / `PluginZWeighting`** — IIR frequency-weighting filters
 - **`PluginFastTimeWeighting` / `PluginSlowTimeWeighting`** — exponential time-weighting filters
-- **`PluginOctaveBand`** — 1/1 or 1/3-octave filter bank; outputs N channels
+- **`PluginOctaveBand`** — arbitrary N/M-octave filter bank; outputs N channels
 - **`LeqAccumulator` / `MaxAccumulator`** — whole-file/stream integrating meters
 - **`LeqMovingMeter` / `MaxMovingMeter`** — sliding-window meters
 - **`Reporter`** — collects meter readings and writes CSV output
@@ -221,27 +222,25 @@ run_measurement("recording.wav", sens, config, print_to_console=True)
 
 ```python
 from slm import Engine, build_chain, parse_metric
-from slm.io import FileController, Reporter
+from slm.io import FileController
 
 controller = FileController("recording.wav", blocksize=1024)
 controller.set_sensitivity(sens, unit="V")
 
 engine = Engine(controller, dt=1.0)
-reporter = Reporter(precision=2)
-engine.reporter = reporter
 
 specs = [parse_metric(m) for m in ["LAeq", "LAFmax", "LZeq:bands:63-8000"]]
-build_chain(specs, engine, reporter)
+build_chain(specs, engine)
 
 engine.run()
-reporter.write("output/measurement")
+engine.reporter.write("output/measurement")
 ```
 
 ### Low-level (manual)
 
 ```python
 from slm import Engine
-from slm.io import FileController, Reporter
+from slm.io import FileController
 from slm.frequency_weighting import PluginAWeighting
 from slm.time_weighting import PluginFastTimeWeighting
 from slm.meter import LeqAccumulator, MaxAccumulator
@@ -254,10 +253,14 @@ bus_a = engine.add_bus("A", PluginAWeighting)
 la = bus_a.frequency_weighting
 laf = bus_a.add_plugin(PluginFastTimeWeighting(input=la))
 
-reporter = Reporter(precision=2)
-engine.reporter = reporter
+laf.create_meter(LeqAccumulator, name="LAeq")
+laf.create_meter(MaxAccumulator, name="LAFmax")
 
-# attach meters and register with reporter
+engine.reporter.add_column("LAeq", laf, "LAeq")
+engine.reporter.add_column("LAFmax", laf, "LAFmax")
+
+engine.run()
+engine.reporter.write("output/measurement")
 ```
 
 ---

@@ -5,7 +5,7 @@ Usage::
     from slm.assembly import parse_metric, build_chain
 
     specs  = [parse_metric(name) for name in ["LAeq", "LAFmax", "LZeq:bands:63-8000"]]
-    build_chain(specs, engine, reporter)
+    build_chain(specs, engine)
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from slm.bus import Bus
     from slm.engine import Engine
-    from slm.io.reporter import Reporter
     from slm.plugin_meter import PluginMeter
 
 
@@ -26,11 +25,11 @@ if TYPE_CHECKING:
 
 _WINDOW_UNIT_SECONDS: dict[str, float] = {"s": 1.0, "m": 60.0, "h": 3600.0}
 
-# L  weighting  [time-weighting]  [measure]  [_window]  [:bands:[1/3:]fmin-fmax]
+# L  weighting  [time-weighting]  [measure]  [_window]  [:bands:[N/M:]fmin-fmax]
 _PATTERN = re.compile(
     r"^L([ACZ])([FSI]?)(eq|max|min|E)?"
     r"(?:_(dt|\d+[smh]))?"
-    r"(?::bands:(?:(1/3):)?(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?))?$"
+    r"(?::bands:(?:(\d+/\d+):)?(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?))?$"
 )
 
 
@@ -70,7 +69,9 @@ class MetricSpec:
     """``(fmin, fmax)`` band limits in Hz, or ``None`` for broadband."""
 
     bands_per_oct: float
-    """Filter density: ``1.0`` for 1/1-octave, ``3.0`` for 1/3-octave."""
+    """Filter density in bands per octave.  For an ``N/M``-octave filter bank
+    this equals ``M/N`` — e.g. ``1.0`` for 1/1-octave, ``3.0`` for 1/3-octave,
+    ``6.0`` for 1/6-octave."""
 
 
 # ---------------------------------------------------------------------------
@@ -82,15 +83,17 @@ def parse_metric(name: str) -> MetricSpec:
 
     Supported syntax::
 
-        L[ACZ][FSI?](eq|max|min|E)[_(dt|Ns|Nm|Nh)][:bands:[1/3:]fmin-fmax]
+        L[ACZ][FSI?](eq|max|min|E)[_(dt|Ns|Nm|Nh)][:bands:[N/M:]fmin-fmax]
 
     Examples::
 
-        parse_metric("LAeq")              # broadband A-weighted Leq, accumulating
-        parse_metric("LAFmax_dt")         # A-weighted fast-max, moving (engine dt window)
-        parse_metric("LZeq_30s")          # Z-weighted Leq, 30-second moving window
-        parse_metric("LZeq:bands:63-8000")  # Z-weighted per 1/1-oct band, accumulating
-        parse_metric("LAF")               # bare metric: most-recent A-fast sample
+        parse_metric("LAeq")                   # broadband A-weighted Leq, accumulating
+        parse_metric("LAFmax_dt")              # A-weighted fast-max, moving (engine dt window)
+        parse_metric("LZeq_30s")              # Z-weighted Leq, 30-second moving window
+        parse_metric("LZeq:bands:63-8000")    # Z-weighted 1/1-oct Leq, 63–8000 Hz
+        parse_metric("LAeq:bands:1/3:31-16000") # A-weighted 1/3-oct Leq, 31–16000 Hz
+        parse_metric("LAeq:bands:1/6:63-8000") # A-weighted 1/6-oct Leq, 63–8000 Hz
+        parse_metric("LAF")                    # bare metric: most-recent A-fast sample
 
     Raises :exc:`ValueError` for any invalid or inconsistent name.
     """
@@ -98,7 +101,7 @@ def parse_metric(name: str) -> MetricSpec:
     if not m:
         raise ValueError(f"Invalid metric name: {name!r}")
 
-    weighting, tw, measure, window_str, third_oct, fmin_str, fmax_str = m.groups()
+    weighting, tw, measure, window_str, frac_str, fmin_str, fmax_str = m.groups()
 
     # Leq must not have a time-weighting letter; max/min must have one
     # No measure → "last" (just the most-recent time-weighted sample); requires tw
@@ -147,7 +150,13 @@ def parse_metric(name: str) -> MetricSpec:
     bands_per_oct = 1.0
     if fmin_str is not None:
         bands = (float(fmin_str), float(fmax_str))
-        bands_per_oct = 3.0 if third_oct == "1/3" else 1.0
+        if frac_str is not None:
+            num, den = (int(p) for p in frac_str.split("/"))
+            if num == 0:
+                raise ValueError(
+                    f"Octave fraction numerator cannot be zero in {name!r}"
+                )
+            bands_per_oct = den / num
 
     return MetricSpec(
         name=name,
@@ -168,9 +177,8 @@ def parse_metric(name: str) -> MetricSpec:
 def build_chain(
     specs: list[MetricSpec],
     engine: Engine,
-    reporter: Reporter,
 ) -> None:
-    """Wire buses, plugins, and meters for *specs*; register each with *reporter*.
+    """Wire buses, plugins, and meters for *specs*; register each with *engine.reporter*.
 
     Shared upstream nodes (buses, time-weighting plugins, octave-band plugins)
     are created lazily and reused across specs with identical parameters.
@@ -186,9 +194,9 @@ def build_chain(
         Bus(freq-weighting) → PluginOctaveBand → [time-weighting | PluginSquare] → Meter
 
     Args:
-        specs:    List of parsed metric descriptors, typically from :func:`parse_metric`.
-        engine:   The :class:`~slm.engine.Engine` instance to attach buses to.
-        reporter: The :class:`~slm.io.reporter.Reporter` that collects meter readings.
+        specs:  List of parsed metric descriptors, typically from :func:`parse_metric`.
+        engine: The :class:`~slm.engine.Engine` instance to attach buses to.
+                Meters are registered with ``engine.reporter``.
     """
     from slm.frequency_weighting import (
         PluginAWeighting, PluginCWeighting, PluginZWeighting,
@@ -351,4 +359,4 @@ def build_chain(
             center_freqs = band_plugin.center_frequencies
         else:
             center_freqs = None
-        reporter.add_column(spec.name, plugin, spec.name, center_frequencies=center_freqs)
+        engine.reporter.add_column(spec.name, plugin, spec.name, center_frequencies=center_freqs)

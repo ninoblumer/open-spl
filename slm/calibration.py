@@ -51,16 +51,9 @@ def calibrate_sensitivity(
     use_stability = stability_window is not None
     dt = 0.5 if use_stability else 1e9   # dt=1e9 → reporter never fires (file path)
 
-    engine = Engine(controller, dt=dt)
-    bus = engine.add_bus("cal", PluginZWeighting)
-    bp = PluginBandpass(fc=cal_freq, input=bus.frequency_weighting, width=1, bus=bus)
-    bus.add_plugin(bp)
-    bp.create_meter(LeqAccumulator, name="leq")
-
     if use_stability:
         from slm.io.reporter import Reporter
 
-        bp.create_meter(LeqMovingMeter, name="leq_moving", t=1.0)
         _history: deque[float] = deque(maxlen=stability_window)
 
         def _on_report(timestamp, bb, bands):
@@ -71,8 +64,16 @@ def calibrate_sensitivity(
                     and float(np.std(_history)) < stability_threshold):
                 controller.stop()
 
-        reporter = Reporter(display_fn=_on_report)
-        engine.reporter = reporter
+        engine = Engine(controller, dt=dt, reporter=Reporter(display_fn=_on_report))
+    else:
+        engine = Engine(controller, dt=dt)
+    bus = engine.add_bus("cal", PluginZWeighting)
+    bp = PluginBandpass(fc=cal_freq, input=bus.frequency_weighting, width=1, bus=bus)
+    bus.add_plugin(bp)
+    bp.create_meter(LeqAccumulator, name="leq")
+
+    if use_stability:
+        bp.create_meter(LeqMovingMeter, name="leq_moving", t=1.0)
 
     engine.run()
 

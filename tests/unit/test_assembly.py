@@ -40,12 +40,11 @@ def _run_chain(tmp_path: Path, metric_names: list[str],
 
     controller = FileController(str(wav), blocksize=blocksize)
     controller.set_sensitivity(sensitivity_v, unit="V")
-    engine = Engine(controller, dt=dt)
     reporter = Reporter()
-    engine.reporter = reporter
+    engine = Engine(controller, dt=dt, reporter=reporter)
 
     specs = [parse_metric(n) for n in metric_names]
-    build_chain(specs, engine, reporter)
+    build_chain(specs, engine)
     engine.run()
     return engine, reporter
 
@@ -77,6 +76,18 @@ class TestParseMetricValid:
         (
             "LAeq:bands:1/3:31-16000",
             "A", None, "eq", False, None, (31.0, 16000.0), 3.0,
+        ),
+        (
+            "LAeq:bands:1/6:63-8000",
+            "A", None, "eq", False, None, (63.0, 8000.0), 6.0,
+        ),
+        (
+            "LAeq:bands:1/12:63-8000",
+            "A", None, "eq", False, None, (63.0, 8000.0), 12.0,
+        ),
+        (
+            "LAeq:bands:2/3:63-8000",
+            "A", None, "eq", False, None, (63.0, 8000.0), 1.5,
         ),
         (
             "LAeq_dt:bands:63-8000",
@@ -136,6 +147,7 @@ class TestParseMetricInvalid:
         "LAeq:",       # trailing colon, no bands
         "",            # empty
         "LAeq:bands:", # bands prefix, no range
+        "LAeq:bands:0/3:63-8000",  # zero numerator in octave fraction
     ])
     def test_invalid(self, name):
         with pytest.raises(ValueError):
