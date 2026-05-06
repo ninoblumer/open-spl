@@ -6,3 +6,4 @@ output/**
 venv/
 dist/
 build/
+.coverage
