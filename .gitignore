@@ -7,3 +7,5 @@ venv/
 dist/
 build/
 .coverage
+todo.md
+thesis_figures/**
