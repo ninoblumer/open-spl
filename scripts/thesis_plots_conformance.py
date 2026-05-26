@@ -893,6 +893,98 @@ def make_fig_4_6b():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# FIG 4.6c — Octave Filter Summation of Output Signals (§5.16)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def make_fig_4_6c():
+    """§5.16 — deviation of adjacent-filter energy sum from reference level.
+
+    For each adjacent octave-band pair and five test frequencies between their
+    mid-bands, measures (L_in − A_ref) − L_sum and checks against the class 1
+    acceptance limits [−1.8, +0.8] dB.
+    """
+    import math
+    from scipy.signal import sosfilt as _sosfilt
+
+    TEST_EXPONENTS = [1/4, 3/8, 1/2, 5/8, 3/4]
+    LO_CL1 = -1.8
+    HI_CL1 = +0.8
+    DURATION_S = 1.0
+
+    centers, sos_list = _get_filterbank()
+    n_bands = len(centers)
+
+    print(f"  computing §5.16 summation deviations "
+          f"({n_bands - 1} pairs × {len(TEST_EXPONENTS)} frequencies)…")
+
+    freqs_all = []
+    devs_all  = []
+
+    n    = int(round(DURATION_S * SAMPLERATE))
+    t    = np.arange(n) / SAMPLERATE
+    skip = n // 2
+
+    for pair_idx in range(n_bands - 1):
+        f_lo   = centers[pair_idx]
+        sos_lo = sos_list[pair_idx]
+        sos_hi = sos_list[pair_idx + 1]
+
+        gain_mid = 20.0 * np.log10(
+            abs(sig.sosfreqz(sos_lo, worN=[f_lo], fs=SAMPLERATE)[1][0]))
+        a_ref = -gain_mid
+        l_in  = 10.0 * math.log10(0.5)
+
+        for exp in TEST_EXPONENTS:
+            f_test = f_lo * G_IEC ** exp
+            x      = np.sin(2.0 * np.pi * f_test * t)
+            p_lo   = float(np.mean(_sosfilt(sos_lo, x)[skip:] ** 2))
+            p_hi   = float(np.mean(_sosfilt(sos_hi, x)[skip:] ** 2))
+            l_sum  = 10.0 * math.log10(max(p_lo + p_hi, 1e-300))
+            freqs_all.append(f_test)
+            devs_all.append((l_in - a_ref) - l_sum)
+
+    freqs_all = np.array(freqs_all)
+    devs_all  = np.array(devs_all)
+    in_tol    = (devs_all >= LO_CL1) & (devs_all <= HI_CL1)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    ax.axhspan(LO_CL1, HI_CL1, color=C_FILL, alpha=0.5, label="Class 1 tolerance")
+    ax.axhline(0, color="black", lw=0.8)
+
+    for f_m in centers:
+        ax.axvline(f_m, color="grey", lw=0.6, ls=":", alpha=0.5)
+
+    # Connect points within each pair with thin lines
+    for i in range(n_bands - 1):
+        sl = slice(i * len(TEST_EXPONENTS), (i + 1) * len(TEST_EXPONENTS))
+        ax.plot(freqs_all[sl], devs_all[sl], color=C_BLUE, lw=0.8, alpha=0.45)
+
+    ax.scatter(freqs_all[in_tol], devs_all[in_tol],
+               color=C_BLUE, s=28, zorder=5, label="Measured")
+    if not np.all(in_tol):
+        ax.scatter(freqs_all[~in_tol], devs_all[~in_tol],
+                   color=C_OUT, s=28, zorder=5, marker="x", label="Outside tolerance")
+
+    ax.set_xscale("log")
+    ax.set_xlim(50, 15000)
+    ax.xaxis.set_major_locator(ticker.LogLocator(base=10, subs=[1.0], numticks=5))
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(
+        lambda x, _: {10: "10", 100: "100", 1000: "1k", 10000: "10k"}.get(int(round(x)), "")
+    ))
+    ax.set_ylim(-2.5, 1.5)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+    ax.set_xlabel("Test frequency (Hz)")
+    ax.set_ylabel(r"$(L_\mathrm{in} - A_\mathrm{ref}) - L_\mathrm{sum}$ (dB)")
+    ax.set_title("IEC 61260-1:2014 §5.16 — Summation of Adjacent Filter Outputs (Class 1)",
+                 fontsize=9)
+    ax.legend(loc="upper right", fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # FIG 4.7 — XL2 Broadband Validation: Metric Differences
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1190,6 +1282,7 @@ if __name__ == "__main__":
         (make_fig_4_5, "fig_4_5_level_linearity"),
         (make_fig_4_6, "fig_4_6_octave_filter_mask"),
         (make_fig_4_6b, "fig_4_6b_octave_filter_phase_groupdelay"),
+        (make_fig_4_6c, "fig_4_6c_octave_summation"),
         (make_fig_4_7, "fig_4_7_xl2_broadband_comparison"),
         (make_fig_4_8, "fig_4_8_xl2_interval_leq"),
         (make_fig_4_9, "fig_4_9_xl2_rta_comparison"),
