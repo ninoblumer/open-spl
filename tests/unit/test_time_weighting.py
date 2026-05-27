@@ -165,3 +165,66 @@ class TestImpulseDecayRate:
         """y(tau_fall) / y(0) must equal e^{-1} to confirm tau_fall=1500 ms."""
         ratio = _asym_fall_ratio(self.tau_rise, self.tau_fall)
         np.testing.assert_allclose(ratio, np.exp(-1), rtol=RTOL)
+
+
+# ---------------------------------------------------------------------------
+# Plugin reset() and to_str()
+# ---------------------------------------------------------------------------
+
+def _make_tw_plugin(cls, **kwargs):
+    from slm.io.noise_controller import NoiseController
+    from slm.engine import Engine
+    from slm.frequency_weighting import PluginZWeighting
+    ctrl = NoiseController(samplerate=48_000, blocksize=1_024)
+    ctrl.set_sensitivity(1.0, unit="V")
+    engine = Engine(ctrl, dt=1.0)
+    bus = engine.add_bus("Z", PluginZWeighting)
+    plugin = cls(input=bus.frequency_weighting, **kwargs)
+    bus.add_plugin(plugin)
+    return plugin
+
+
+class TestTimeWeightingResetAndToStr:
+
+    def test_fast_reset_clears_output(self):
+        from slm.time_weighting import PluginFastTimeWeighting
+        p = _make_tw_plugin(PluginFastTimeWeighting)
+        p.output[:] = 99.0
+        p.reset()
+        assert np.all(p.output == 0.0)
+
+    def test_fast_to_str(self):
+        from slm.time_weighting import PluginFastTimeWeighting
+        p = _make_tw_plugin(PluginFastTimeWeighting)
+        assert "fast" in p.to_str().lower() or "PluginFastTimeWeighting" in p.to_str()
+
+    def test_slow_reset_clears_output(self):
+        from slm.time_weighting import PluginSlowTimeWeighting
+        p = _make_tw_plugin(PluginSlowTimeWeighting)
+        p.output[:] = 99.0
+        p.reset()
+        assert np.all(p.output == 0.0)
+
+    def test_slow_to_str(self):
+        from slm.time_weighting import PluginSlowTimeWeighting
+        p = _make_tw_plugin(PluginSlowTimeWeighting)
+        assert isinstance(p.to_str(), str) and len(p.to_str()) > 0
+
+    def test_impulse_reset_clears_output(self):
+        from slm.time_weighting import PluginImpulseTimeWeighting
+        p = _make_tw_plugin(PluginImpulseTimeWeighting)
+        p.output[:] = 99.0
+        p.reset()
+        assert np.all(p.output == 0.0)
+
+    def test_square_reset_clears_output(self):
+        from slm.time_weighting import PluginSquare
+        p = _make_tw_plugin(PluginSquare)
+        p.output[:] = 99.0
+        p.reset()
+        assert np.all(p.output == 0.0)
+
+    def test_square_to_str(self):
+        from slm.time_weighting import PluginSquare
+        p = _make_tw_plugin(PluginSquare)
+        assert isinstance(p.to_str(), str)

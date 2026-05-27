@@ -7,7 +7,6 @@ beyond the ``sounddevice`` package.
 from __future__ import annotations
 
 import queue
-import threading
 
 import numpy as np
 try:
@@ -25,9 +24,8 @@ class SounddeviceController(RealtimeController):
     """Cross-platform real-time audio controller using PortAudio via sounddevice.
 
     The PortAudio callback runs on a dedicated OS audio thread and pushes
-    blocks into a bounded :class:`queue.Queue`.  :meth:`read_block` blocks
-    on the queue (with a short timeout) so the engine's main-thread loop
-    stays responsive to :meth:`stop` and ``KeyboardInterrupt``.
+    blocks into the queue owned by :class:`RealtimeController`.
+    :meth:`read_block` pops from the queue on the engine's main thread.
 
     Parameters
     ----------
@@ -44,8 +42,8 @@ class SounddeviceController(RealtimeController):
         Sample format passed to sounddevice (default ``'float32'``).
     queue_maxsize:
         Maximum number of blocks buffered between the callback and
-        :meth:`read_block`.  If the engine falls behind, excess blocks
-        are dropped and :attr:`overruns` is incremented (default 4).
+        :meth:`read_block`.  If the engine falls behind, excess blocks are
+        dropped and :attr:`overruns` is incremented (default 4).
     """
 
     def __init__(
@@ -58,17 +56,12 @@ class SounddeviceController(RealtimeController):
         queue_maxsize: int = 4,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(samplerate=samplerate, blocksize=blocksize,
+                         queue_maxsize=queue_maxsize, **kwargs)
         self._device = device
-        self._samplerate = samplerate
-        self._blocksize = blocksize
         self._channels = channels
         self._dtype = dtype
-        self._sensitivity: float = 1.0
-        self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=queue_maxsize)
-        self._stop_event = threading.Event()
         self._stream: sd.InputStream | None = None
-        self._overruns: int = 0
 
     # ------------------------------------------------------------------
     # RealtimeController interface
@@ -90,7 +83,7 @@ class SounddeviceController(RealtimeController):
 
     def start(self) -> None:
         """Open and start the PortAudio input stream."""
-        self._stop_event.clear()
+        super().start()
         self._stream = sd.InputStream(
             device=self._device,
             samplerate=self._samplerate,
@@ -101,54 +94,19 @@ class SounddeviceController(RealtimeController):
         )
         self._stream.start()
 
-    # ------------------------------------------------------------------
-    # Controller interface
-    # ------------------------------------------------------------------
-
-    @property
-    def samplerate(self) -> int:
-        return self._samplerate
-
-    @property
-    def blocksize(self) -> int:
-        return self._blocksize
-
-    @property
-    def sensitivity(self) -> float:
-        return self._sensitivity
-
-    def read_block(self) -> tuple[np.ndarray, int]:
-        """Block until the next audio block is available, then return it.
-
-        Returns ``(block, index)`` where *block* has shape
-        ``(blocksize, channels)`` — matching the :class:`FileController`
-        convention so the engine's ``.transpose()`` call works unchanged.
-
-        Raises :exc:`StopIteration` once :meth:`stop` has been called and
-        the queue is drained.
-        """
-        while True:
-            try:
-                block = self._queue.get(timeout=0.5)
-                return block, next(self._counter)
-            except queue.Empty:
-                if self._stop_event.is_set():
-                    raise StopIteration
-
     def stop(self) -> None:
-        """Signal the stream to stop and close the PortAudio device."""
-        self._stop_event.set()
+        """Stop and close the PortAudio stream."""
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        super().stop()
 
     def calibrate(self, target_spl: float = 94.0) -> None:
         """Derive and set sensitivity from a live calibrator tone.
 
         Starts the stream, runs :func:`~slm.calibration.calibrate_sensitivity`
         with stability detection, then stops the stream and stores the result.
-        The stream is stopped automatically once the reading has converged.
         """
         from slm.calibration import calibrate_sensitivity
 
@@ -159,15 +117,6 @@ class SounddeviceController(RealtimeController):
         finally:
             self.stop()
         self.set_sensitivity(sens, unit="V")
-
-    # ------------------------------------------------------------------
-    # Extra
-    # ------------------------------------------------------------------
-
-    @property
-    def overruns(self) -> int:
-        """Number of blocks dropped due to the engine processing too slowly."""
-        return self._overruns
 
     # ------------------------------------------------------------------
     # Internal

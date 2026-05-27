@@ -70,7 +70,6 @@ class TestSounddeviceControllerInterface:
         ctrl = _make_controller(samplerate=44_100, blocksize=512, channels=2)
         assert ctrl.samplerate == 44_100
         assert ctrl.blocksize == 512
-        # sensitivity defaults to 1.0 until set_sensitivity is called
         assert ctrl.sensitivity == 1.0
 
     def test_set_sensitivity_v(self):
@@ -87,22 +86,24 @@ class TestSounddeviceControllerInterface:
         ctrl = _make_controller()
         assert ctrl.overruns == 0
 
+    def test_rho_mean_none_before_blocks(self):
+        ctrl = _make_controller()
+        assert ctrl.rho_mean is None
+
+    def test_queue_depth_max_zero_initially(self):
+        ctrl = _make_controller()
+        assert ctrl.queue_depth_max == 0
+
 
 class TestReadBlock:
 
     def _run_with_fake_stream(self, n_blocks: int, blocksize: int = 1_024,
                                channels: int = 1):
-        """Start a controller backed by _FakeStream and read all blocks.
-
-        Uses a queue large enough to never drop blocks, and reads until
-        StopIteration so no fixed-count loop is needed.
-        """
+        """Start a controller backed by _FakeStream and read all blocks."""
         ctrl = _make_controller(blocksize=blocksize, channels=channels,
                                 queue_maxsize=n_blocks + 4)
         ctrl.set_sensitivity(1.0, unit="V")
 
-        # on_done=ctrl.stop: after all blocks are delivered, stop the controller
-        # so read_block() raises StopIteration once the queue is drained.
         fake = _FakeStream(ctrl._callback, n_blocks, blocksize, channels,
                            on_done=ctrl.stop)
 
@@ -119,30 +120,29 @@ class TestReadBlock:
             except StopIteration:
                 pass
 
-        return blocks, indices
+        return ctrl, blocks, indices
 
     def test_block_count(self):
-        blocks, _ = self._run_with_fake_stream(n_blocks=10)
+        _, blocks, _ = self._run_with_fake_stream(n_blocks=10)
         assert len(blocks) == 10
 
     def test_block_shape(self):
         blocksize, channels = 512, 1
-        blocks, _ = self._run_with_fake_stream(n_blocks=5, blocksize=blocksize,
-                                                channels=channels)
+        _, blocks, _ = self._run_with_fake_stream(n_blocks=5, blocksize=blocksize,
+                                                   channels=channels)
         for b in blocks:
             assert b.shape == (blocksize, channels)
 
     def test_block_shape_stereo(self):
-        blocks, _ = self._run_with_fake_stream(n_blocks=3, blocksize=256, channels=2)
+        _, blocks, _ = self._run_with_fake_stream(n_blocks=3, blocksize=256, channels=2)
         for b in blocks:
             assert b.shape == (256, 2)
 
     def test_block_indices_sequential(self):
-        _, indices = self._run_with_fake_stream(n_blocks=8)
+        _, _, indices = self._run_with_fake_stream(n_blocks=8)
         assert indices == list(range(8))
 
     def test_stop_raises_stop_iteration(self):
-        """read_block() must raise StopIteration after stop() drains the queue."""
         ctrl = _make_controller(queue_maxsize=4)
         fake = _FakeStream(ctrl._callback, n_blocks=0, blocksize=1_024, channels=1)
 
@@ -154,34 +154,81 @@ class TestReadBlock:
                 ctrl.read_block()
 
     def test_callback_copies_buffer(self):
-        """Each block stored in the queue must be an independent copy."""
         ctrl = _make_controller(blocksize=64, queue_maxsize=16)
         original = np.ones((64, 1), dtype=np.float32)
         ctrl._callback(original, 64, None, None)
-        # Mutate the original — the queued block must be unaffected
         original[:] = 0.0
         queued = ctrl._queue.get_nowait()
         assert np.all(queued == 1.0)
 
     def test_overrun_on_full_queue(self):
-        """Callback drops blocks and increments overruns when queue is full."""
         ctrl = _make_controller(blocksize=64, queue_maxsize=2)
         block = np.zeros((64, 1), dtype=np.float32)
-        # Fill the queue
         ctrl._callback(block, 64, None, None)
         ctrl._callback(block, 64, None, None)
-        # This one should overflow
         ctrl._callback(block, 64, None, None)
         assert ctrl.overruns == 1
 
     def test_overrun_on_callback_status(self):
-        """A non-zero sounddevice status increments overruns."""
         ctrl = _make_controller(blocksize=64, queue_maxsize=8)
         block = np.zeros((64, 1), dtype=np.float32)
         status = MagicMock()
-        status.__bool__ = lambda s: True   # truthy status
+        status.__bool__ = lambda s: True
         ctrl._callback(block, 64, None, status)
         assert ctrl.overruns == 1
+
+
+class TestLoadMonitoring:
+
+    def test_rho_mean_populated_after_blocks(self):
+        ctrl = _make_controller(blocksize=1_024, queue_maxsize=20)
+        fake = _FakeStream(ctrl._callback, n_blocks=10, blocksize=1_024, channels=1,
+                           on_done=ctrl.stop)
+        with patch("slm.io.sounddevice_controller.sd.InputStream",
+                   return_value=fake):
+            ctrl.start()
+            try:
+                while True:
+                    ctrl.read_block()
+            except StopIteration:
+                pass
+        assert ctrl.rho_mean is not None
+        assert ctrl.rho_mean >= 0.0
+
+    def test_rho_mean_resets_on_restart(self):
+        ctrl = _make_controller(blocksize=1_024, queue_maxsize=20)
+        fake = _FakeStream(ctrl._callback, n_blocks=5, blocksize=1_024, channels=1,
+                           on_done=ctrl.stop)
+        with patch("slm.io.sounddevice_controller.sd.InputStream",
+                   return_value=fake):
+            ctrl.start()
+            try:
+                while True:
+                    ctrl.read_block()
+            except StopIteration:
+                pass
+        assert ctrl.rho_mean is not None
+        # start() resets monitoring state
+        fake2 = _FakeStream(ctrl._callback, n_blocks=0, blocksize=1_024, channels=1)
+        with patch("slm.io.sounddevice_controller.sd.InputStream",
+                   return_value=fake2):
+            ctrl.start()
+            ctrl.stop()
+        assert ctrl.rho_mean is None
+
+    def test_queue_depth_max_non_negative(self):
+        ctrl = _make_controller(blocksize=1_024, queue_maxsize=20)
+        fake = _FakeStream(ctrl._callback, n_blocks=10, blocksize=1_024, channels=1,
+                           on_done=ctrl.stop)
+        with patch("slm.io.sounddevice_controller.sd.InputStream",
+                   return_value=fake):
+            ctrl.start()
+            try:
+                while True:
+                    ctrl.read_block()
+            except StopIteration:
+                pass
+        assert ctrl.queue_depth_max >= 0
 
 
 class TestListDevices:
@@ -199,7 +246,6 @@ class TestListDevices:
                    return_value=fake_devices):
             result = SounddeviceController.list_devices()
 
-        # Only input-capable devices are returned
         assert len(result) == 2
         assert result[0]["name"] == "Mic A"
         assert result[1]["name"] == "Mic B"
@@ -218,10 +264,8 @@ class TestListDevices:
 
 
 class TestEngineIntegration:
-    """Run a short Engine loop through SounddeviceController with mocked audio."""
 
     def test_engine_processes_blocks(self):
-        """Engine should accumulate LAeq from fake audio without error."""
         from slm.engine import Engine
         from slm.assembly import parse_metric, build_chain
         from slm.io.reporter import Reporter
@@ -234,7 +278,6 @@ class TestEngineIntegration:
                                 queue_maxsize=32)
         ctrl.set_sensitivity(1.0, unit="V")
 
-        # on_done=ctrl.stop ensures read_block() raises StopIteration after all blocks land
         fake = _FakeStream(ctrl._callback, n_blocks, blocksize, channels=1,
                            on_done=ctrl.stop)
 
@@ -246,10 +289,8 @@ class TestEngineIntegration:
             engine = Engine(ctrl, dt=0.1, reporter=reporter)
             build_chain([parse_metric("LAeq")], engine)
 
-            engine.run()   # stops when _FakeStream finishes and queue drains
+            engine.run()
 
-        # Reporter should have recorded at least one row
         assert len(reporter._broadband_rows) >= 1
-        # The final LAeq value should be a finite number
         last = reporter._broadband_rows[-1]["LAeq"]
         assert np.isfinite(last)

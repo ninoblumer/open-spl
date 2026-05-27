@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from slm.meter import (
-    LeqAccumulator, MaxAccumulator, MinAccumulator,
+    LeqAccumulator, MaxAccumulator, MinAccumulator, LastAccumulatingMeter,
     LeqMovingMeter, MaxMovingMeter, MinMovingMeter, LastMovingMeter,
 )
 
@@ -179,6 +179,19 @@ class TestMaxMovingMeter:
         assert m.read()[0] == 1.0
 
 
+class TestMinMovingMeter:
+
+    def test_rolling_min(self):
+        p = _moving_parent(blocksize=4800)
+        m = MinMovingMeter(name="min", parent=p, t=1.0)
+        for _ in range(10):
+            m.process(np.array([[2.0] * 4800]))
+        np.testing.assert_array_equal(m.read(), [2.0])
+        for _ in range(10):
+            m.process(np.array([[0.5] * 4800]))
+        np.testing.assert_array_equal(m.read(), [0.5])
+
+
 class TestLastMovingMeter:
 
     def test_returns_last_sample(self):
@@ -196,3 +209,59 @@ class TestLastMovingMeter:
             m.process(np.full((1, 4800), float(v)))
         # last pushed value was 11.0
         assert m.read()[0] == 11.0
+
+
+# ---------------------------------------------------------------------------
+# to_str coverage
+# ---------------------------------------------------------------------------
+
+class TestToStr:
+
+    def test_accumulating_to_str(self):
+        p = _parent()
+        m = LeqAccumulator(name="leq", parent=p)
+        assert "LeqAccumulator" in m.to_str()
+        assert "leq" in m.to_str()
+
+    def test_moving_to_str(self):
+        p = _moving_parent()
+        m = LeqMovingMeter(name="leq", parent=p, t=1.0)
+        assert "LeqMovingMeter" in m.to_str()
+        assert "leq" in m.to_str()
+
+
+# ---------------------------------------------------------------------------
+# LastAccumulatingMeter.reset
+# ---------------------------------------------------------------------------
+
+class TestLastAccumulatingMeterReset:
+
+    def test_reset_clears_last(self):
+        from slm.meter import LastAccumulatingMeter
+        p = _parent()
+        m = LastAccumulatingMeter(name="last", parent=p)
+        m.process(np.array([[1.0, 2.0, 3.0, 4.0]]))
+        m.reset()
+        np.testing.assert_array_equal(m._last, [0.0])
+
+
+# ---------------------------------------------------------------------------
+# Meter.get_chain
+# ---------------------------------------------------------------------------
+
+class TestMeterGetChain:
+
+    def test_chain_includes_meter_and_upstream(self):
+        from slm.io.noise_controller import NoiseController
+        from slm.engine import Engine
+        from slm.assembly import parse_metric, build_chain
+        ctrl = NoiseController(samplerate=48_000, blocksize=1_024)
+        ctrl.set_sensitivity(1.0, unit="V")
+        engine = Engine(ctrl, dt=1.0)
+        build_chain([parse_metric("LAeq")], engine)
+        bus = engine._busses["A"]
+        fw = bus.frequency_weighting
+        meter = fw.meters["LAeq"]
+        chain = meter.get_chain()
+        assert meter in chain
+        assert bus in chain

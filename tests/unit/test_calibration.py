@@ -31,3 +31,21 @@ class TestCalibrateFunction:
             cal_level=94.0,
         )
         assert result == pytest.approx(meas_000.sensitivity, rel=1e-2)
+
+    def test_stability_window_path(self, meas_000):
+        """stability_window branch stops early once tone is stable."""
+        from slm.io.file_controller import FileController
+
+        controller = FileController(str(meas_000.wav_path), blocksize=1024)
+        controller.set_sensitivity(1.0, unit="V")
+
+        # Very loose threshold — any 3 half-second readings are "stable", so the
+        # callback will call controller.stop() after 3 reporter firings.
+        result = calibrate_sensitivity(
+            controller,
+            cal_freq=1000.0,
+            cal_level=94.0,
+            stability_window=3,
+            stability_threshold=100.0,
+        )
+        assert result == pytest.approx(meas_000.sensitivity, rel=1e-2)

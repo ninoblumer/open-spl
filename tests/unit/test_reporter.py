@@ -331,3 +331,43 @@ class TestConsoleOutput:
         r.record(_td(0.5), dt=1.0)  # too soon — should be skipped
         out = capsys.readouterr().out
         assert out == ""
+
+
+# ---------------------------------------------------------------------------
+# display_fn callback
+# ---------------------------------------------------------------------------
+
+class TestDisplayFn:
+
+    def test_display_fn_called_with_values(self):
+        calls = []
+
+        def my_display(timestamp, bb, bands):
+            calls.append((timestamp, bb.copy(), bands.copy()))
+
+        r = Reporter(display_fn=my_display)
+        p = _plugin(1, np.array([94.0]))
+        r.add_column("LAF", p, "LAF")
+        r.record(_td(1.0), dt=1.0)
+
+        assert len(calls) == 1
+        assert "LAF" in calls[0][1]
+        assert "timestamp" not in calls[0][1]
+
+    def test_display_fn_excludes_timestamp_from_dicts(self):
+        keys_seen = {}
+
+        def capture(ts, bb, bands):
+            keys_seen.update({"bb": set(bb), "bands": set(bands)})
+
+        r = Reporter(display_fn=capture)
+        p_bb = _plugin(1, np.array([94.0]))
+        p_band = _plugin(3, np.array([72.0, 81.0, 88.0]))
+        r.add_column("LAF", p_bb, "LAF")
+        r.add_column("LZeq", p_band, "LZeq", center_frequencies=["63", "125", "250"])
+        r.record(_td(1.0), dt=1.0)
+
+        assert "timestamp" not in keys_seen["bb"]
+        assert "timestamp" not in keys_seen["bands"]
+        assert "LAF" in keys_seen["bb"]
+        assert "LZeq" in keys_seen["bands"]

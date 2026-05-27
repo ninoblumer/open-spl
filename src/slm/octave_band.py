@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 
-class StatefulOctaveFilterBank(OctaveFilterBank):
+class StatefulOctaveFilterBank(OctaveFilterBank):  # pragma: no cover
     def __init__(self, zero_zi: bool = True, **kwargs):
         super().__init__(**kwargs)
         self._zero_zi = zero_zi

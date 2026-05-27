@@ -22,14 +22,16 @@ class FileController(Controller):
     _filename: Path | str
     _stream: Generator[np.ndarray, None, None]
     _done: bool
+    _overruns: int
 
 
-    def __init__(self, filename: str | Path, blocksize: int = 256, overlap: int = 0,
+    def __init__(self, filename: str | Path, blocksize: int = 1024, overlap: int = 0,
                  realtime: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._sf = None
         self._realtime = realtime
         self._next_block_time: float | None = None
+        self._overruns: int = 0
         self.open(filename, blocksize=blocksize, overlap=overlap)
 
     def open(self, filename: str | Path, *, blocksize: int, overlap: int = 0):
@@ -49,6 +51,8 @@ class FileController(Controller):
         self._next_block_time = None  # reset on (re-)open
 
     def read_block(self) -> tuple[np.ndarray, int]:
+        if self._done:
+            raise StopIteration
         if self._realtime:
             now = time.monotonic()
             if self._next_block_time is None:
@@ -56,12 +60,19 @@ class FileController(Controller):
             sleep_for = self._next_block_time - now
             if sleep_for > 0:
                 time.sleep(sleep_for)
+            else:
+                self._overruns += 1
             self._next_block_time += self._blocksize / self._sf.samplerate
         try:
             return next(self._stream), next(self._counter)
         except StopIteration:
             self._done = True
             raise
+
+    @property
+    def overruns(self) -> int:
+        """Number of blocks where processing exceeded the real-time block period."""
+        return self._overruns
 
     def calibrate(self, target_spl=94.0):
         raise NotImplementedError()

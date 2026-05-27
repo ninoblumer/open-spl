@@ -2,6 +2,7 @@
 from slm.io.controller import Controller
 from slm.io.file_controller import FileController
 from slm.io.realtime_controller import RealtimeController
+from slm.io.noise_controller import NoiseController
 from slm.io.reporter import Reporter
 from slm.io.display import make_display_fn
 
@@ -15,6 +16,7 @@ __all__ = [
     "Controller",
     "FileController",
     "RealtimeController",
+    "NoiseController",
     "Reporter",
     "make_display_fn",
     *( ["SounddeviceController"] if _has_sounddevice else [] ),

@@ -1,6 +1,6 @@
 .idea
-output/**
-.claude/**
+output/
+.claude/
 **/__pycache__
 *.egg-info/
 venv/

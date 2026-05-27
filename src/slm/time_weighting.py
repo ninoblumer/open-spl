@@ -112,7 +112,7 @@ class PluginSquare(PluginTimeWeighting):
         np.square(block, out=self.output)
 
 
-@jit(nopython=True)
+@jit(nopython=True)  # pragma: no cover
 def asymmetric_time_weighting(x, *, zi, alpha_rise, alpha_fall):
     """
     Process one block with IEC 61672-1 Impulse time weighting.

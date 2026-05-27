@@ -165,6 +165,10 @@ class TestParseMetricInvalid:
         with pytest.raises(ValueError, match="LE does not use a time-weighting letter"):
             parse_metric("LAFE")
 
+    def test_bare_metric_with_window_suffix_raises(self):
+        with pytest.raises(ValueError, match="window suffix"):
+            parse_metric("LAF_5s")
+
 
 # ---------------------------------------------------------------------------
 # Structural tests (synthetic WAV)

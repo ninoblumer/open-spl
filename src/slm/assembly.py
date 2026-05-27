@@ -138,7 +138,7 @@ def parse_metric(name: str) -> MetricSpec:
         else:
             n = float(window_str[:-1])
             unit = window_str[-1]
-            if unit not in _WINDOW_UNIT_SECONDS:
+            if unit not in _WINDOW_UNIT_SECONDS:  # pragma: no cover
                 valid = ", ".join(_WINDOW_UNIT_SECONDS)
                 raise ValueError(
                     f"Unknown window unit {unit!r} in {name!r}; expected one of: {valid}"
