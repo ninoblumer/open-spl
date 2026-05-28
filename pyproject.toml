@@ -27,6 +27,7 @@ dependencies = [
     "soundfile",
     "sounddevice",
     "pyoctaveband",
+    "numba",
 ]
 
 [project.urls]

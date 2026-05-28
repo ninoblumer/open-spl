@@ -363,10 +363,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--run-b", nargs="*", default=None, metavar="LOADOUT:BLOCKSIZE",
         help=(
-            "Quantity B cells to run, e.g. --run-b K2:256 K2:512. "
-            "If omitted, Quantity B is skipped. "
-            "Run A first, identify borderline cells (rho_median ≈ 50%%–100%%), "
-            "then re-invoke with --run-b for those cells only."
+            "Quantity B cells to run. "
+            "Bare --run-b (no tokens) runs B for all loadout×blocksize combinations. "
+            "Pass specific cells to limit scope, e.g. --run-b K2:256 K2:512. "
+            "If omitted entirely, Quantity B is skipped."
         ),
     )
     return p
@@ -427,18 +427,22 @@ def main() -> None:
         )
         return
 
-    b_cells: list[tuple[str, int]] = []
-    for token in args.run_b:
-        try:
-            lo, bs_str = token.split(":", 1)
-            bs = int(bs_str)
-        except ValueError:
-            sys.exit(
-                f"Invalid --run-b token {token!r}. Expected LOADOUT:BLOCKSIZE, e.g. K2:256"
-            )
-        if lo not in LOADOUTS:
-            sys.exit(f"Unknown loadout {lo!r} in --run-b. Valid: {list(LOADOUTS)}")
-        b_cells.append((lo, bs))
+    if not args.run_b:
+        # bare --run-b with no tokens → run B for all loadout×blocksize combinations
+        b_cells = [(lo, bs) for lo in args.loadouts for bs in blocksizes_sorted]
+    else:
+        b_cells = []
+        for token in args.run_b:
+            try:
+                lo, bs_str = token.split(":", 1)
+                bs = int(bs_str)
+            except ValueError:
+                sys.exit(
+                    f"Invalid --run-b token {token!r}. Expected LOADOUT:BLOCKSIZE, e.g. K2:256"
+                )
+            if lo not in LOADOUTS:
+                sys.exit(f"Unknown loadout {lo!r} in --run-b. Valid: {list(LOADOUTS)}")
+            b_cells.append((lo, bs))
 
     rows_b: list[dict] = []
     for i, (lo, bs) in enumerate(b_cells, 1):
