@@ -1,4 +1,5 @@
 import time
+import warnings
 from pathlib import Path
 from typing import Generator
 
@@ -46,6 +47,14 @@ class FileController(Controller):
         self._overlap = overlap
         self._filename = filename
         self._sf = sf.SoundFile(filename)
+        if self._sf.channels > 1:
+            warnings.warn(
+                f"Audio file '{Path(filename).name}' has {self._sf.channels} channels; "
+                "only mono is supported. Only channel 0 will be analysed.",
+                UserWarning,
+                stacklevel=2,
+            )
+        self._multichannel = self._sf.channels > 1
         self._stream = self._sf.blocks(blocksize=self._blocksize, overlap=self._overlap,
                                        fill_value=0.0, always_2d=True)
         self._next_block_time = None  # reset on (re-)open
@@ -64,7 +73,10 @@ class FileController(Controller):
                 self._overruns += 1
             self._next_block_time += self._blocksize / self._sf.samplerate
         try:
-            return next(self._stream), next(self._counter)
+            block = next(self._stream)
+            if self._multichannel:
+                block = block[:, 0:1]
+            return block, next(self._counter)
         except StopIteration:
             self._done = True
             raise

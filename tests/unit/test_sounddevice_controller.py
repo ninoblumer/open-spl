@@ -67,7 +67,8 @@ class _FakeStream:
 class TestSounddeviceControllerInterface:
 
     def test_properties(self):
-        ctrl = _make_controller(samplerate=44_100, blocksize=512, channels=2)
+        with pytest.warns(UserWarning, match="channel 0"):
+            ctrl = _make_controller(samplerate=44_100, blocksize=512, channels=2)
         assert ctrl.samplerate == 44_100
         assert ctrl.blocksize == 512
         assert ctrl.sensitivity == 1.0
@@ -104,7 +105,7 @@ class TestReadBlock:
                                 queue_maxsize=n_blocks + 4)
         ctrl.set_sensitivity(1.0, unit="V")
 
-        fake = _FakeStream(ctrl._callback, n_blocks, blocksize, channels,
+        fake = _FakeStream(ctrl._callback, n_blocks, blocksize, ctrl._channels,
                            on_done=ctrl.stop)
 
         with patch("slm.io.sounddevice_controller.sd.InputStream",
@@ -133,10 +134,12 @@ class TestReadBlock:
         for b in blocks:
             assert b.shape == (blocksize, channels)
 
-    def test_block_shape_stereo(self):
-        _, blocks, _ = self._run_with_fake_stream(n_blocks=3, blocksize=256, channels=2)
+    def test_block_shape_stereo_clamped_to_mono(self):
+        """channels=2 is clamped to 1 with a warning; blocks are always mono."""
+        with pytest.warns(UserWarning, match="channel 0"):
+            _, blocks, _ = self._run_with_fake_stream(n_blocks=3, blocksize=256, channels=2)
         for b in blocks:
-            assert b.shape == (256, 2)
+            assert b.shape == (256, 1)
 
     def test_block_indices_sequential(self):
         _, _, indices = self._run_with_fake_stream(n_blocks=8)

@@ -60,6 +60,13 @@ class Engine:
         block, block_index = self._controller.read_block()
         block = block.transpose()
 
+        if block.shape[0] > 1:
+            raise ValueError(
+                f"Engine received a {block.shape[0]}-channel block; only mono (1 channel) "
+                "is supported. Use a controller that extracts a single channel, or create "
+                "one engine per channel."
+            )
+
         for bus in self._busses.values():
             bus.process(block)
 

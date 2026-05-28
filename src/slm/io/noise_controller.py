@@ -4,6 +4,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import warnings
 
 import numpy as np
 
@@ -53,6 +54,14 @@ class NoiseController(RealtimeController):
         seed: int | None = None,
         **kwargs,
     ) -> None:
+        if channels > 1:
+            warnings.warn(
+                f"NoiseController was given channels={channels}; only mono is supported. "
+                "Only channel 0 will be generated.",
+                UserWarning,
+                stacklevel=2,
+            )
+            channels = 1
         super().__init__(samplerate=samplerate, blocksize=blocksize,
                          queue_maxsize=queue_maxsize, **kwargs)
         self._channels = channels

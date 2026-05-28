@@ -7,6 +7,7 @@ beyond the ``sounddevice`` package.
 from __future__ import annotations
 
 import queue
+import warnings
 
 import numpy as np
 try:
@@ -56,6 +57,14 @@ class SounddeviceController(RealtimeController):
         queue_maxsize: int = 16,
         **kwargs,
     ) -> None:
+        if channels > 1:
+            warnings.warn(
+                f"SounddeviceController was given channels={channels}; only mono is supported. "
+                "Only channel 0 will be used.",
+                UserWarning,
+                stacklevel=2,
+            )
+            channels = 1
         super().__init__(samplerate=samplerate, blocksize=blocksize,
                          queue_maxsize=queue_maxsize, **kwargs)
         self._device = device
