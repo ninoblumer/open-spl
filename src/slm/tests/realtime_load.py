@@ -18,7 +18,7 @@ Quantity B — real-time deadline violations (realtime=True)
 Usage
 -----
     python -m slm.tests.realtime_load [--samplerate 48000] [--blocksizes 128 256 …]
-        [--loadouts K0 K1 K2 K3] [--duration 300] [--rt-duration 3600]
+        [--loadouts K0 K1 K2] [--duration 300] [--rt-duration 3600]
         [--out results/] [--run-b K2:256 K2:512]
 """
 from __future__ import annotations
@@ -56,29 +56,20 @@ _K1 = [
 ]
 
 _K2 = _K1 + [
-    # K1 plus the full IEC 61260-1 third-octave filter bank on each weighting.
-    "LAeq:bands:1/3:31-16000",
-    "LCeq:bands:1/3:31-16000",
-    "LZeq:bands:1/3:31-16000",
-]
-
-_K3 = _K2 + [
-    # K2 plus moving-average Leq at 1 s–60 s.  These are inexpensive (one extra
-    # accumulator per averaging time over an already-filtered/squared signal), so
-    # the K3−K2 delta should be small — this proves how cheap the extension is.
-    "LAeq_1s",  "LAeq_2s",  "LAeq_5s",  "LAeq_10s",
-    "LAeq_15s", "LAeq_30s", "LAeq_60s",
-    "LCeq_1s",  "LCeq_2s",  "LCeq_5s",  "LCeq_10s",
-    "LCeq_15s", "LCeq_30s", "LCeq_60s",
-    "LZeq_1s",  "LZeq_2s",  "LZeq_5s",  "LZeq_10s",
-    "LZeq_15s", "LZeq_30s", "LZeq_60s",
+    # K1 plus the full IEC 61260-1 third-octave filter bank on each weighting,
+    # with all the same metric types as the broadband section (Leq, Fmax, Smax, F, S).
+    "LAeq:bands:1/3:31-16000", "LAFmax:bands:1/3:31-16000", "LASmax:bands:1/3:31-16000",
+    "LAF:bands:1/3:31-16000",  "LAS:bands:1/3:31-16000",
+    "LCeq:bands:1/3:31-16000", "LCFmax:bands:1/3:31-16000", "LCSmax:bands:1/3:31-16000",
+    "LCF:bands:1/3:31-16000",  "LCS:bands:1/3:31-16000",
+    "LZeq:bands:1/3:31-16000", "LZFmax:bands:1/3:31-16000", "LZSmax:bands:1/3:31-16000",
+    "LZF:bands:1/3:31-16000",  "LZS:bands:1/3:31-16000",
 ]
 
 LOADOUTS: dict[str, list[str]] = {
     "K0": _K0,
     "K1": _K1,
     "K2": _K2,
-    "K3": _K3,
 }
 
 DEFAULT_BLOCKSIZES: list[int] = [128, 256, 512, 1024, 4096]
@@ -114,17 +105,25 @@ def _run_loop(
     reporter,
     target_blocks: int,
     timed: bool,
-) -> np.ndarray | None:
+    record_queue: bool = False,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Drive the processing loop for target_blocks blocks.
 
     read_block() is always outside the timed region.  If timed=True, every
-    block's processing time is recorded and returned as a numpy array.
+    block's processing time is recorded.  If record_queue=True, the queue
+    depth is sampled after each read_block() call.
+
+    Returns (t_procs, queue_depths), each None if not requested.
     """
     engine._last_timestamp = None
     t_procs: list[float] = []
+    queue_depths: list[int] = []
 
     for _ in range(target_blocks):
         block, block_idx = controller.read_block()
+
+        if record_queue:
+            queue_depths.append(controller._queue.qsize())
 
         # ── timed region ──────────────────────────────────────────────────
         if timed:
@@ -141,7 +140,10 @@ def _run_loop(
             t_procs.append(time.perf_counter() - t0)
         # ─────────────────────────────────────────────────────────────────
 
-    return np.array(t_procs) if timed else None
+    return (
+        np.array(t_procs) if timed else None,
+        np.array(queue_depths, dtype=np.int32) if record_queue else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +191,7 @@ def measure_quantity_a(
 
     controller.start()
     try:
-        t_procs = _run_loop(engine, controller, reporter, target_blocks, timed=True)
+        t_procs, _ = _run_loop(engine, controller, reporter, target_blocks, timed=True)
     finally:
         controller.stop()
 
@@ -221,12 +223,15 @@ def measure_quantity_b(
     blocksize: int,
     samplerate: int,
     rt_duration_s: float,
-) -> dict:
-    """Real-time overrun count after running for rt_duration_s of audio time.
+) -> tuple[dict, np.ndarray]:
+    """Real-time overrun count and per-block queue depth for rt_duration_s of audio.
 
     Uses NoiseController(realtime=True), which paces block delivery to
     wall-clock time and increments overruns each time a block arrives late.
+    Queue depth is sampled after each read_block() call.
     Motivating standard: IEC 61260-1 §5.14.4.
+
+    Returns (summary_row, queue_depths).
     """
     engine, controller, reporter = _make_engine(
         loadout_name, blocksize, samplerate, dt=1.0, realtime=True
@@ -235,20 +240,26 @@ def measure_quantity_b(
 
     controller.start()
     try:
-        _run_loop(engine, controller, reporter, target_blocks, timed=False)
+        _, queue_depths = _run_loop(
+            engine, controller, reporter, target_blocks,
+            timed=False, record_queue=True,
+        )
     finally:
         controller.stop()
 
+    assert queue_depths is not None
     overruns = controller.overruns
-    return {
+    summary = {
         "loadout": loadout_name,
         "blocksize": blocksize,
         "samplerate": samplerate,
         "block_count": target_blocks,
         "overruns": overruns,
         "overrun_rate": overruns / target_blocks if target_blocks > 0 else float("nan"),
+        "mean_queue_depth": float(np.mean(queue_depths)),
         "rt_duration_s": rt_duration_s,
     }
+    return summary, queue_depths
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +273,16 @@ def _write_rho_csv(rho: np.ndarray, path: Path) -> None:
         f.write("rho\n")
         for v in rho:
             f.write(f"{v:.6f}\n")
+    print(f"  wrote {path}", file=sys.stderr)
+
+
+def _write_queue_csv(queue_depths: np.ndarray, path: Path) -> None:
+    """Write per-block queue depth values; row number is the block index."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as f:
+        f.write("queue_depth\n")
+        for v in queue_depths:
+            f.write(f"{v}\n")
     print(f"  wrote {path}", file=sys.stderr)
 
 
@@ -325,7 +346,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--loadouts", nargs="+", default=list(LOADOUTS),
         choices=list(LOADOUTS), metavar="K",
-        help="Loadouts to run (K0 K1 K2 K3).",
+        help="Loadouts to run (K0 K1 K2).",
     )
     p.add_argument(
         "--duration", type=float, default=300.0, metavar="S",
@@ -426,10 +447,12 @@ def main() -> None:
             f"  rt_duration={args.rt_duration:.0f}s …",
             end="  ", flush=True, file=sys.stderr,
         )
-        row = measure_quantity_b(lo, bs, args.samplerate, args.rt_duration)
+        row, queue_depths = measure_quantity_b(lo, bs, args.samplerate, args.rt_duration)
         rows_b.append(row)
+        _write_queue_csv(queue_depths, out_dir / "queue_depth" / f"{lo}_{bs}.csv")
         print(
-            f"overruns={row['overruns']}  rate={row['overrun_rate']:.2e}",
+            f"overruns={row['overruns']}  rate={row['overrun_rate']:.2e}"
+            f"  mean_queue={row['mean_queue_depth']:.2f}",
             file=sys.stderr,
         )
 

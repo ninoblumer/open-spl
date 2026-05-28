@@ -38,7 +38,7 @@ class NoiseController(RealtimeController):
         Enable real-time pacing (default ``True``).
     queue_maxsize:
         Queue depth before excess blocks are dropped in realtime mode
-        (default 4).
+        (default 16).
     seed:
         Optional random seed for reproducibility.
     """
@@ -49,7 +49,7 @@ class NoiseController(RealtimeController):
         blocksize: int = 1_024,
         channels: int = 1,
         realtime: bool = True,
-        queue_maxsize: int = 4,
+        queue_maxsize: int = 16,
         seed: int | None = None,
         **kwargs,
     ) -> None:

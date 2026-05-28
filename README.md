@@ -364,8 +364,7 @@ size.  No audio hardware is required — a built-in white-noise generator drives
 |----|-------------|
 | K0 | Normative minimum: LAF + LAeq |
 | K1 | Typical Class-1 handheld: A/C/Z with F- and S-time-weighting, Leq and max |
-| K2 | K1 + full IEC 61260-1 1/3-octave filter bank on each weighting |
-| K3 | K2 + 1 s–60 s moving-average Leq on each weighting |
+| K2 | K1 + full IEC 61260-1 1/3-octave filter bank on each weighting, with all broadband metric types (Leq, Fmax, Smax, F, S) per band |
 
 ### Processing utilisation (free-running)
 
@@ -386,7 +385,7 @@ Options:
 ```
 --samplerate 48000          sample rate in Hz (default: 48000)
 --blocksizes 128 256 …      block sizes to test (default: 128 256 512 1024 4096)
---loadouts K0 K1 K2 K3      loadouts to test (default: all four)
+--loadouts K0 K1 K2         loadouts to test (default: all three)
 --duration 300              audio-time duration per Quantity A cell in seconds
 --out results/              output directory (created if absent)
 ```

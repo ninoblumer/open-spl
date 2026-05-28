@@ -43,7 +43,7 @@ class SounddeviceController(RealtimeController):
     queue_maxsize:
         Maximum number of blocks buffered between the callback and
         :meth:`read_block`.  If the engine falls behind, excess blocks are
-        dropped and :attr:`overruns` is incremented (default 4).
+        dropped and :attr:`overruns` is incremented (default 16).
     """
 
     def __init__(
@@ -53,7 +53,7 @@ class SounddeviceController(RealtimeController):
         blocksize: int = 1_024,
         channels: int = 1,
         dtype: str = "float32",
-        queue_maxsize: int = 4,
+        queue_maxsize: int = 16,
         **kwargs,
     ) -> None:
         super().__init__(samplerate=samplerate, blocksize=blocksize,

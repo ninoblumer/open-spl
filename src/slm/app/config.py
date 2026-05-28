@@ -13,6 +13,7 @@ class SLMConfig:
     metrics: list[str] = field(default_factory=list)
     dt: float = 1.0
     output: str = "output/measurement"
+    queue_maxsize: int = 16
 
     # ------------------------------------------------------------------
     # TOML I/O
@@ -32,7 +33,7 @@ class SLMConfig:
             raise ValueError(f"Unknown TOML sections: {unknown_sections}")
 
         meas = data.get("measurement", {})
-        unknown_meas = set(meas.keys()) - {"dt", "output"}
+        unknown_meas = set(meas.keys()) - {"dt", "output", "queue_maxsize"}
         if unknown_meas:
             raise ValueError(f"Unknown keys in [measurement]: {unknown_meas}")
 
@@ -51,10 +52,15 @@ class SLMConfig:
         if dt <= 0:
             raise ValueError(f"[measurement] dt must be positive, got {dt}")
 
+        queue_maxsize = int(meas.get("queue_maxsize", 16))
+        if queue_maxsize < 1:
+            raise ValueError(f"[measurement] queue_maxsize must be >= 1, got {queue_maxsize}")
+
         return cls(
             metrics=list(require),
             dt=dt,
             output=str(meas.get("output", "output/measurement")),
+            queue_maxsize=queue_maxsize,
         )
 
     def to_toml(self, path: str | Path) -> None:
@@ -70,8 +76,9 @@ class SLMConfig:
 
         content = (
             "[measurement]\n"
-            f"dt     = {self.dt}\n"
-            f'output = "{self.output}"\n'
+            f"dt            = {self.dt}\n"
+            f'output        = "{self.output}"\n'
+            f"queue_maxsize = {self.queue_maxsize}\n"
             "\n"
             "[metrics]\n"
             f"require = {metrics_value}\n"
@@ -83,6 +90,8 @@ class SLMConfig:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_args(cls, metrics: list[str], dt: float, output: str) -> "SLMConfig":
+    def from_args(cls, metrics: list[str], dt: float, output: str,
+                  queue_maxsize: int = 16) -> "SLMConfig":
         """Construct from parsed command-line arguments."""
-        return cls(metrics=list(metrics), dt=dt, output=output)
+        return cls(metrics=list(metrics), dt=dt, output=output,
+                   queue_maxsize=queue_maxsize)

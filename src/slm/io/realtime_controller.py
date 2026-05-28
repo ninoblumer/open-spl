@@ -34,7 +34,8 @@ class RealtimeController(Controller):
         self,
         samplerate: int,
         blocksize: int,
-        queue_maxsize: int = 4,
+        queue_maxsize: int = 16,
+        dt: float = 1.0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -45,8 +46,8 @@ class RealtimeController(Controller):
         self._stop_event = threading.Event()
         self._overruns: int = 0
 
-        # Load monitoring: ~1 s rolling window
-        _window = max(1, round(samplerate / blocksize))
+        # Load monitoring: rolling window sized to dt (the logging interval)
+        _window = max(1, round(dt * samplerate / blocksize))
         self._rho_buf: deque[float] = deque(maxlen=_window)
         self._qdepth_buf: deque[int] = deque(maxlen=_window)
         self._last_return_t: float | None = None

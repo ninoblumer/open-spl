@@ -175,6 +175,63 @@ def run_measurement(
 # Real-time measurement
 # ---------------------------------------------------------------------------
 
+def run_noise_measurement(
+    sensitivity_v: float,
+    config: "SLMConfig",
+    samplerate: int = 48_000,
+    blocksize: int = 1_024,
+    print_to_console: bool = False,
+    display_mode: str = "plain",
+) -> None:
+    """Run a measurement driven by white-noise input (no audio hardware required).
+
+    Uses :class:`~slm.io.noise_controller.NoiseController` in real-time mode.
+    Useful for testing the processing pipeline and the status display.
+    """
+    if sensitivity_v <= 0:
+        raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
+    from slm.assembly import parse_metric, build_chain
+    from slm.io.noise_controller import NoiseController
+    from slm.engine import Engine
+    from slm.io.reporter import Reporter
+    from slm.io.display import make_display_fn
+
+    specs = [parse_metric(m) for m in config.metrics]
+
+    controller = NoiseController(
+        samplerate=samplerate, blocksize=blocksize,
+        realtime=True, queue_maxsize=config.queue_maxsize, dt=config.dt,
+    )
+    controller.set_sensitivity(sensitivity_v, unit="V")
+    controller.start()
+
+    print(
+        f"  Source: white-noise generator  |  "
+        f"Sample rate: {samplerate} Hz  |  "
+        f"Block size: {blocksize}  |  "
+        f"Queue max: {config.queue_maxsize} blocks"
+    )
+
+    display_fn = (
+        make_display_fn(display_mode, precision=2, controller=controller)
+        if print_to_console else None
+    )
+    reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
+    engine = Engine(controller, dt=config.dt, reporter=reporter)
+
+    build_chain(specs, engine)
+
+    try:
+        engine.run()
+    except KeyboardInterrupt:
+        print("\nMeasurement interrupted.")
+        controller.stop()
+    finally:
+        if controller.overruns:
+            print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
+        reporter.write(config.output)
+
+
 def run_realtime_measurement(
     sensitivity_v: float,
     config: "SLMConfig",
@@ -200,12 +257,22 @@ def run_realtime_measurement(
     specs = [parse_metric(m) for m in config.metrics]
 
     controller = SounddeviceController(
-        device=device, samplerate=samplerate, blocksize=blocksize
+        device=device, samplerate=samplerate, blocksize=blocksize,
+        queue_maxsize=config.queue_maxsize, dt=config.dt,
     )
     controller.set_sensitivity(sensitivity_v, unit="V")
     controller.start()
 
-    display_fn = make_display_fn(display_mode, precision=2) if print_to_console else None
+    print(
+        f"  Sample rate: {samplerate} Hz  |  "
+        f"Block size: {blocksize}  |  "
+        f"Queue max: {config.queue_maxsize} blocks"
+    )
+
+    display_fn = (
+        make_display_fn(display_mode, precision=2, controller=controller)
+        if print_to_console else None
+    )
     reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
     engine = Engine(controller, dt=config.dt, reporter=reporter)
 
@@ -258,6 +325,7 @@ class SLMShell(cmd.Cmd):
         self._display_mode: str = "plain"
         self._realtime: bool = False
         self._device: int | str | None = None
+        self._generator_mode: bool = False
 
     # ------------------------------------------------------------------
     # Metric management
@@ -337,7 +405,21 @@ Examples:
             self._device = int(arg)
         except ValueError:
             self._device = arg
+        self._generator_mode = False
         print(f"Device: {self._device!r}")
+
+    def do_generator(self, _: str) -> None:
+        """generator — use the white-noise generator as input source.
+
+Produces Gaussian white noise in real-time without requiring any audio
+hardware.  Useful for testing the processing pipeline and the status display.
+
+Clears any previously set file or device source.
+"""
+        self._generator_mode = True
+        self._wav_path = None
+        self._device = None
+        print("  Source: white-noise generator")
 
     def do_file(self, arg: str) -> None:
         """file PATH — set the WAV file to measure."""
@@ -349,6 +431,7 @@ Examples:
             print(f"File not found: {path}")
             return
         self._wav_path = path
+        self._generator_mode = False
         print(f"File: {path}")
 
     def complete_file(self, text, line, begidx, endidx):
@@ -469,12 +552,46 @@ Use this when you have a physical calibrator and a recording of it; use
         except ValueError:
             print(f"Invalid dt: {arg.strip()!r}")
 
+    def do_queue(self, arg: str) -> None:
+        """queue N — set the real-time block queue depth (default: 4).
+
+N blocks are buffered between the audio driver and the engine.  A larger
+value absorbs OS scheduling jitter at the cost of higher latency.  The
+engine reports overruns when this buffer is full.
+
+Examples:
+  queue      show current setting
+  queue 4    tight — sensitive to scheduling spikes (default)
+  queue 16   generous — absorbs bursts; ~85 ms latency at bs=4096/48 kHz
+"""
+        arg = arg.strip()
+        if not arg:
+            print(f"  Queue max: {self._config.queue_maxsize} blocks")
+            return
+        try:
+            n = int(arg)
+            if n < 1:
+                raise ValueError
+        except ValueError:
+            print(f"Invalid value: {arg!r}  (must be a positive integer)")
+            return
+        self._config.queue_maxsize = n
+        print(f"  Queue max: {n} blocks")
+
     def do_show(self, _: str) -> None:
         """show — display the current configuration."""
-        print(f"  File:        {self._wav_path or '(not set)'}")
-        print(f"  Device:      {self._device if self._device is not None else '(not set — file mode)'}")
+        if self._generator_mode:
+            source = "white-noise generator"
+        elif self._wav_path:
+            source = f"file: {self._wav_path}"
+        elif self._device is not None:
+            source = f"device: {self._device!r}"
+        else:
+            source = "(not set)"
+        print(f"  Source:      {source}")
         print(f"  Sensitivity: {'(not set)' if self._sensitivity_v is None else self._sensitivity_v}")
         print(f"  dt:          {self._config.dt} s")
+        print(f"  Queue max:   {self._config.queue_maxsize} blocks")
         print(f"  Output:      {self._config.output}")
         print(f"  Metrics:     {self._config.metrics or '(none)'}")
         print(f"  Display:     {self._display_mode}")
@@ -766,8 +883,8 @@ When disabled (default), the file is processed as fast as possible.
 
     def do_start(self, _: str) -> None:
         """start — run the measurement with the current configuration."""
-        if not self._wav_path and self._device is None:
-            print("No source set.  Use: file PATH  or  device INDEX")
+        if not self._wav_path and self._device is None and not self._generator_mode:
+            print("No source set.  Use: file PATH  |  device INDEX  |  generator")
             return
         if self._sensitivity_v is None:
             print("No sensitivity set.  Use: sensitivity ... or calibrate")
@@ -775,7 +892,14 @@ When disabled (default), the file is processed as fast as possible.
         if not self._config.metrics:
             print("No metrics set.  Use: add METRIC")
             return
-        if self._wav_path:
+        if self._generator_mode:
+            run_noise_measurement(
+                self._sensitivity_v,
+                self._config,
+                print_to_console=True,
+                display_mode=self._display_mode,
+            )
+        elif self._wav_path:
             run_measurement(
                 self._wav_path,
                 self._sensitivity_v,

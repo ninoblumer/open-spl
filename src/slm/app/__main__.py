@@ -31,12 +31,16 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Sound Level Meter — IEC 61672-1 compliant measurement tool.",
     )
 
-    # Input source: --file and --device are mutually exclusive
+    # Input source: --file, --device, --generator are mutually exclusive
     source_group = parser.add_mutually_exclusive_group()
     source_group.add_argument("--file", metavar="PATH", help="Input WAV file")
     source_group.add_argument(
         "--device", metavar="INDEX_OR_NAME",
         help="Real-time audio input device index or name substring (use --list-devices to see options)",
+    )
+    source_group.add_argument(
+        "--generator", action="store_true",
+        help="Use the white-noise generator as input (no audio hardware required)",
     )
     parser.add_argument(
         "--list-devices", action="store_true",
@@ -83,6 +87,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--realtime", "-r", action="store_true",
         help="Simulate real-time playback: pace processing so each dt interval takes dt real seconds",
     )
+    parser.add_argument(
+        "--queue-maxsize", type=int, default=None, metavar="N",
+        help="Real-time block queue depth (default: 4). Larger values absorb scheduling jitter.",
+    )
 
     sens_group = parser.add_mutually_exclusive_group()
     sens_group.add_argument(
@@ -128,6 +136,9 @@ def main() -> None:
     if args.list_devices or args.device is not None:
         _require_sounddevice(parser)
 
+    if args.generator and not (args.measure or args.config):
+        parser.error("--generator requires --measure METRIC [...] or --config FILE.toml")
+
     # ------------------------------------------------------------------ #
     # Interactive REPL                                                     #
     # ------------------------------------------------------------------ #
@@ -146,7 +157,7 @@ def main() -> None:
     if args.realtime and not args.file:
         parser.error("--realtime requires --file")
 
-    no_action = (not args.file and args.device is None
+    no_action = (not args.file and args.device is None and not args.generator
                  and not args.calibrate and not args.measure and not args.config)
     if no_action:
         # Bare invocation — open an empty shell
@@ -167,11 +178,14 @@ def main() -> None:
                 config.output = args.output
             if args.dt is not None:
                 config.dt = args.dt
+            if args.queue_maxsize is not None:
+                config.queue_maxsize = args.queue_maxsize
         else:
             config = SLMConfig.from_args(
                 metrics=list(args.measure) if args.measure else [],
                 dt=args.dt if args.dt is not None else 1.0,
                 output=args.output if args.output is not None else "output/measurement",
+                queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else 16,
             )
 
         # Parse device: try int, fall back to string
@@ -188,6 +202,8 @@ def main() -> None:
             config=config,
         )
         shell._device = device
+        if args.generator:
+            shell._generator_mode = True
         shell.cmdloop()
         return
 
@@ -228,6 +244,8 @@ def main() -> None:
             config.output = args.output
         if args.dt is not None:
             config.dt = args.dt
+        if args.queue_maxsize is not None:
+            config.queue_maxsize = args.queue_maxsize
     else:
         if not args.measure:
             parser.error(
@@ -238,10 +256,11 @@ def main() -> None:
             metrics=list(args.measure),
             dt=args.dt if args.dt is not None else 1.0,
             output=args.output if args.output is not None else "output/measurement",
+            queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else 16,
         )
 
-    if not args.file and args.device is None:
-        parser.error("--file or --device is required for one-shot measurement")
+    if not args.file and args.device is None and not args.generator:
+        parser.error("--file, --device, or --generator is required for one-shot measurement")
 
     sens = _resolve_sensitivity(args)
     if sens is None:
@@ -252,6 +271,13 @@ def main() -> None:
 
     if args.file:
         run_measurement(args.file, sens, config, print_to_console=True, realtime=args.realtime)
+    elif args.generator:
+        from slm.app.cli import run_noise_measurement
+        run_noise_measurement(
+            sens, config,
+            samplerate=args.samplerate,
+            print_to_console=True,
+        )
     else:
         from slm.app.cli import run_realtime_measurement
         run_realtime_measurement(
