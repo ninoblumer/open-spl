@@ -30,11 +30,13 @@ class RealtimeController(Controller):
         Maximum queued blocks before the producer drops and counts an overrun.
     """
 
+    DEFAULT_QUEUE_MAXSIZE: int = 64
+
     def __init__(
         self,
         samplerate: int,
         blocksize: int,
-        queue_maxsize: int = 16,
+        queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
         dt: float = 1.0,
         **kwargs,
     ) -> None:

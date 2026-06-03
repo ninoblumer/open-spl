@@ -6,7 +6,9 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from slm.constants import REFERENCE_PRESSURE
+from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
+from slm.io.controller import Controller
+from slm.io.realtime_controller import RealtimeController
 
 if TYPE_CHECKING:
     from slm.app.config import SLMConfig
@@ -68,9 +70,9 @@ def _fmt_sensitivity(sens_v: float) -> str:
 
 def calibrate_from_file(
     wav_path: str | Path,
-    cal_freq: float = 1000.0,
-    cal_level: float = 94.0,
-    blocksize: int = 1024,
+    cal_freq: float = CALIBRATION_FREQ_HZ,
+    cal_level: float = CALIBRATION_LEVEL_DB,
+    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
 ) -> float:
     """Derive controller sensitivity from a calibrator-tone WAV recording.
 
@@ -94,10 +96,10 @@ def calibrate_from_file(
 
 def calibrate_from_device(
     device: int | str | None = None,
-    samplerate: int = 48_000,
-    blocksize: int = 1_024,
-    cal_freq: float = 1000.0,
-    cal_level: float = 94.0,
+    samplerate: int = Controller.DEFAULT_SAMPLERATE,
+    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
+    cal_freq: float = CALIBRATION_FREQ_HZ,
+    cal_level: float = CALIBRATION_LEVEL_DB,
     stability_window: int = 10,
     stability_threshold: float = 0.1,
 ) -> float:
@@ -178,8 +180,8 @@ def run_measurement(
 def run_noise_measurement(
     sensitivity_v: float,
     config: "SLMConfig",
-    samplerate: int = 48_000,
-    blocksize: int = 1_024,
+    samplerate: int = Controller.DEFAULT_SAMPLERATE,
+    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
     print_to_console: bool = False,
     display_mode: str = "plain",
 ) -> None:
@@ -236,8 +238,8 @@ def run_realtime_measurement(
     sensitivity_v: float,
     config: "SLMConfig",
     device: int | str | None = None,
-    samplerate: int = 48_000,
-    blocksize: int = 1_024,
+    samplerate: int = Controller.DEFAULT_SAMPLERATE,
+    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
     print_to_console: bool = False,
     display_mode: str = "plain",
 ) -> None:
@@ -497,8 +499,8 @@ Use this when you have a physical calibrator and a recording of it; use
         if not self._wav_path and self._device is None:
             print("No source set.  Use: file PATH  or  device INDEX")
             return
-        cal_level = 94.0
-        cal_freq = 1000.0
+        cal_level = CALIBRATION_LEVEL_DB
+        cal_freq = CALIBRATION_FREQ_HZ
         parts = arg.split()
         if len(parts) >= 1:
             try:

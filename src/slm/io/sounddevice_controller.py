@@ -18,6 +18,8 @@ except ImportError as _exc:
         "Install it with: pip install sounddevice"
     ) from _exc
 
+from slm.constants import CALIBRATION_LEVEL_DB
+from slm.io.controller import Controller
 from slm.io.realtime_controller import RealtimeController
 
 
@@ -44,17 +46,17 @@ class SounddeviceController(RealtimeController):
     queue_maxsize:
         Maximum number of blocks buffered between the callback and
         :meth:`read_block`.  If the engine falls behind, excess blocks are
-        dropped and :attr:`overruns` is incremented (default 16).
+        dropped and :attr:`overruns` is incremented (default 64).
     """
 
     def __init__(
         self,
         device: int | str | None = None,
-        samplerate: int = 48_000,
-        blocksize: int = 1_024,
+        samplerate: int = Controller.DEFAULT_SAMPLERATE,
+        blocksize: int = Controller.DEFAULT_BLOCKSIZE,
         channels: int = 1,
         dtype: str = "float32",
-        queue_maxsize: int = 16,
+        queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE,
         **kwargs,
     ) -> None:
         if channels > 1:
@@ -111,7 +113,7 @@ class SounddeviceController(RealtimeController):
             self._stream = None
         super().stop()
 
-    def calibrate(self, target_spl: float = 94.0) -> None:
+    def calibrate(self, target_spl: float = CALIBRATION_LEVEL_DB) -> None:
         """Derive and set sensitivity from a live calibrator tone.
 
         Starts the stream, runs :func:`~slm.calibration.calibrate_sensitivity`

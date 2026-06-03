@@ -24,6 +24,10 @@ from __future__ import annotations
 import argparse
 import sys
 
+from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB
+from slm.io.controller import Controller
+from slm.io.realtime_controller import RealtimeController
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -47,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List available audio input devices and exit",
     )
     parser.add_argument(
-        "--samplerate", type=int, default=48_000, metavar="HZ",
+        "--samplerate", type=int, default=Controller.DEFAULT_SAMPLERATE, metavar="HZ",
         help="Sample rate for real-time input (default: 48000)",
     )
     parser.add_argument(
@@ -59,11 +63,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Calibration mode: compute sensitivity from a calibrator-tone recording",
     )
     parser.add_argument(
-        "--cal-level", type=float, default=94.0, metavar="DB",
+        "--cal-level", type=float, default=CALIBRATION_LEVEL_DB, metavar="DB",
         help="Calibrator level in dB SPL (default: 94.0)",
     )
     parser.add_argument(
-        "--cal-freq", type=float, default=1000.0, metavar="HZ",
+        "--cal-freq", type=float, default=CALIBRATION_FREQ_HZ, metavar="HZ",
         help="Calibrator tone frequency in Hz (default: 1000.0)",
     )
     parser.add_argument(
@@ -185,7 +189,7 @@ def main() -> None:
                 metrics=list(args.measure) if args.measure else [],
                 dt=args.dt if args.dt is not None else 1.0,
                 output=args.output if args.output is not None else "output/measurement",
-                queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else 16,
+                queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else RealtimeController.DEFAULT_QUEUE_MAXSIZE,
             )
 
         # Parse device: try int, fall back to string
@@ -256,7 +260,7 @@ def main() -> None:
             metrics=list(args.measure),
             dt=args.dt if args.dt is not None else 1.0,
             output=args.output if args.output is not None else "output/measurement",
-            queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else 16,
+            queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else RealtimeController.DEFAULT_QUEUE_MAXSIZE,
         )
 
     if not args.file and args.device is None and not args.generator:

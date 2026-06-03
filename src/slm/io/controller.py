@@ -4,8 +4,13 @@ from typing import Literal
 
 import numpy as np
 
+from slm.constants import CALIBRATION_LEVEL_DB
+
 
 class Controller(ABC):
+    DEFAULT_SAMPLERATE: int = 48_000
+    DEFAULT_BLOCKSIZE: int = 1_024
+
     def __init__(self, **kwargs):
         super().__init__()
         self._counter = itertools.count(0)
@@ -32,7 +37,7 @@ class Controller(ABC):
         ...
 
     @abstractmethod
-    def calibrate(self, target_spl=94.0):
+    def calibrate(self, target_spl=CALIBRATION_LEVEL_DB):
         ...
 
     def set_sensitivity(self, sensitivity: float, unit: Literal["mV", "V", "dB"]) -> None:

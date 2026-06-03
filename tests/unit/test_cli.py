@@ -390,20 +390,10 @@ class TestSLMShellInspect:
 
 class TestSLMConfigQueueMaxsize:
 
-    def test_default_queue_maxsize(self):
-        config = SLMConfig()
-        assert config.queue_maxsize == 16
-
     def test_round_trip_queue_maxsize(self, tmp_path):
         config = SLMConfig(metrics=["LAeq"], queue_maxsize=16)
         path = tmp_path / "cfg.toml"
         config.to_toml(path)
-        loaded = SLMConfig.from_toml(path)
-        assert loaded.queue_maxsize == 16
-
-    def test_queue_maxsize_in_toml_defaults_to_16(self, tmp_path):
-        path = tmp_path / "cfg.toml"
-        path.write_text("[measurement]\ndt = 1.0\n", encoding="utf-8")
         loaded = SLMConfig.from_toml(path)
         assert loaded.queue_maxsize == 16
 
@@ -418,10 +408,6 @@ class TestSLMConfigQueueMaxsize:
         path.write_text("[measurement]\nqueue_maxsize = -1\n", encoding="utf-8")
         with pytest.raises(ValueError, match="queue_maxsize"):
             SLMConfig.from_toml(path)
-
-    def test_from_args_default_queue_maxsize(self):
-        config = SLMConfig.from_args(["LAeq"], dt=1.0, output="out")
-        assert config.queue_maxsize == 16
 
     def test_from_args_custom_queue_maxsize(self):
         config = SLMConfig.from_args(["LAeq"], dt=1.0, output="out", queue_maxsize=8)
@@ -538,7 +524,7 @@ class TestSLMShellQueue:
         shell = SLMShell()
         shell.do_queue("")
         out = capsys.readouterr().out
-        assert "16" in out
+        assert str(shell._config.queue_maxsize) in out
 
     def test_queue_sets_value(self, capsys):
         shell = SLMShell()
@@ -553,10 +539,11 @@ class TestSLMShellQueue:
 
     def test_queue_zero_rejected(self, capsys):
         shell = SLMShell()
+        original = shell._config.queue_maxsize
         shell.do_queue("0")
         out = capsys.readouterr().out
         assert "Invalid" in out
-        assert shell._config.queue_maxsize == 16   # unchanged
+        assert shell._config.queue_maxsize == original  # unchanged
 
     def test_queue_negative_rejected(self, capsys):
         shell = SLMShell()

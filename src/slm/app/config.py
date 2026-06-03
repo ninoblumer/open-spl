@@ -5,6 +5,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from slm.io.realtime_controller import RealtimeController
+
 
 @dataclass
 class SLMConfig:
@@ -13,7 +15,7 @@ class SLMConfig:
     metrics: list[str] = field(default_factory=list)
     dt: float = 1.0
     output: str = "output/measurement"
-    queue_maxsize: int = 16
+    queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE
 
     # ------------------------------------------------------------------
     # TOML I/O
@@ -52,7 +54,7 @@ class SLMConfig:
         if dt <= 0:
             raise ValueError(f"[measurement] dt must be positive, got {dt}")
 
-        queue_maxsize = int(meas.get("queue_maxsize", 16))
+        queue_maxsize = int(meas.get("queue_maxsize", RealtimeController.DEFAULT_QUEUE_MAXSIZE))
         if queue_maxsize < 1:
             raise ValueError(f"[measurement] queue_maxsize must be >= 1, got {queue_maxsize}")
 
@@ -91,7 +93,7 @@ class SLMConfig:
 
     @classmethod
     def from_args(cls, metrics: list[str], dt: float, output: str,
-                  queue_maxsize: int = 16) -> "SLMConfig":
+                  queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE) -> "SLMConfig":
         """Construct from parsed command-line arguments."""
         return cls(metrics=list(metrics), dt=dt, output=output,
                    queue_maxsize=queue_maxsize)

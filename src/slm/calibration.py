@@ -1,13 +1,13 @@
 """Core calibration routine — controller-agnostic."""
 from __future__ import annotations
 
-from slm.constants import REFERENCE_PRESSURE
+from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
 
 
 def calibrate_sensitivity(
     controller,
-    cal_freq: float = 1000.0,
-    cal_level: float = 94.0,
+    cal_freq: float = CALIBRATION_FREQ_HZ,
+    cal_level: float = CALIBRATION_LEVEL_DB,
     stability_window: int | None = None,
     stability_threshold: float = 0.1,
 ) -> float:
