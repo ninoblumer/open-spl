@@ -12,10 +12,10 @@ import io
 import pstats
 import numpy as np
 
-from soundlevelmeter.io.controller import Controller
-from soundlevelmeter.engine import Engine
-from soundlevelmeter.assembly import parse_metric, build_chain
-from soundlevelmeter.io.reporter import Reporter
+from slm.io.controller import Controller
+from slm.engine import Engine
+from slm.assembly import parse_metric, build_chain
+from slm.io.reporter import Reporter
 
 
 # ---------------------------------------------------------------------------
@@ -64,32 +64,22 @@ class NoiseController(Controller):
 
 
 # ---------------------------------------------------------------------------
-# Metric set
+# K2 loadout — mirrors realtime_benchmark.py LOADOUTS["K2"]
 # ---------------------------------------------------------------------------
 
-METRIC_NAMES = [
-    # Broadband accumulating Leq
-    "LAeq", "LCeq", "LZeq",
-    # Broadband accumulating max/min
-    "LAFmax", "LASmax",
-    "LCFmax", "LCSmax",
-    "LZFmax", "LZSmax",
-    # Broadband accumulating min
-    "LAFmin", "LASmin",
-    # Moving Leq (engine dt window)
-    "LAeq_dt", "LCeq_dt", "LZeq_dt",
-    # Moving max
-    "LAFmax_dt", "LASmax_dt",
-    # Longer moving windows
-    "LAeq_1s", "LAeq_10s",
-    # Sound exposure
-    "LAE",
-    # 1/1-octave band Leq (Z-weighted)
-    "LZeq:bands:63-8000",
-    # 1/1-octave band Leq (A-weighted)
-    "LAeq:bands:63-8000",
-    # 1/3-octave band Leq (A-weighted)
-    "LAeq:bands:1/3:100-8000",
+_K1 = [
+    "LAeq", "LAFmax", "LASmax", "LAF", "LAS",
+    "LCeq", "LCFmax", "LCSmax", "LCF", "LCS",
+    "LZeq", "LZFmax", "LZSmax", "LZF", "LZS",
+]
+
+METRIC_NAMES = _K1 + [
+    "LAeq:bands:1/3:31-16000", "LAFmax:bands:1/3:31-16000", "LASmax:bands:1/3:31-16000",
+    "LAF:bands:1/3:31-16000",  "LAS:bands:1/3:31-16000",
+    "LCeq:bands:1/3:31-16000", "LCFmax:bands:1/3:31-16000", "LCSmax:bands:1/3:31-16000",
+    "LCF:bands:1/3:31-16000",  "LCS:bands:1/3:31-16000",
+    "LZeq:bands:1/3:31-16000", "LZFmax:bands:1/3:31-16000", "LZSmax:bands:1/3:31-16000",
+    "LZF:bands:1/3:31-16000",  "LZS:bands:1/3:31-16000",
 ]
 
 

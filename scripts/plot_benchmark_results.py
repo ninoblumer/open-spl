@@ -1,5 +1,5 @@
 """
-Generate plots from realtime_load.py benchmark results.
+Generate plots from realtime_benchmark.py benchmark results.
 
 Expects an output directory containing benchmark_48k/ and benchmark_96k/
 subdirectories, each with quantity_a.csv and quantity_b.csv.
@@ -314,7 +314,7 @@ def _plot_k2_combined(
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python tests/benchmark/plot_benchmark_results.py",
-        description="Plot realtime_load.py benchmark results.",
+        description="Plot realtime_benchmark.py benchmark results.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(

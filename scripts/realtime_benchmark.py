@@ -331,7 +331,7 @@ def _print_table_a(rows_a: list[dict], blocksizes: list[int]) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="python tests/benchmark/realtime_load.py",
+        prog="python tests/benchmark/realtime_benchmark.py",
         description="SLM real-time capability benchmark (IEC 61260-1 §5.14.4).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

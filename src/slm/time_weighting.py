@@ -2,7 +2,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import numpy as np
-from scipy.signal import lfilter, lfilter_zi
 from numba import jit
 
 from slm.plugin_meter import PluginMeter
@@ -39,19 +38,13 @@ class PluginSymmetricTimeWeighting(PluginTimeWeighting):
         self._compute_filter()
 
     def _compute_filter(self):
-        alpha = 1 - np.exp(-1 / (self.tau*self.samplerate))
-        self._b = [alpha]
-        self._a = [1, -(1 - alpha)]
-        zi = lfilter_zi(self._b, self._a)
-        self._zi = np.tile(zi, (self.width, 1))
-
-        if self._zero_zi:
-            self._zi.fill(0)
+        self._alpha = float(1 - np.exp(-1 / (self.tau * self.samplerate)))
+        # Steady-state initial condition for unit input is 1.0; zeros if zero_zi.
+        init = 0.0 if self._zero_zi else 1.0
+        self._zi = np.full(self.width, init, dtype=np.float64)
 
     def func(self, block: np.ndarray):
-        self.output[:,:], self._zi[:,:] = lfilter(self._b, self._a,
-                                        np.square(block),
-                                        axis=-1, zi=self._zi)
+        _symmetric_time_weighting(block, self._zi, self._alpha, self.output)
 
 
 class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
@@ -70,12 +63,7 @@ class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
         self._zi = np.zeros(self.width)
 
     def func(self, block: np.ndarray):
-        x2 = np.square(block)
-        for ch in range(self.width):
-            self.output[ch], self._zi[ch] = asymmetric_time_weighting(
-                x2[ch], zi=self._zi[ch],
-                alpha_rise=self._alpha_rise, alpha_fall=self._alpha_fall
-            )
+        _asymmetric_time_weighting(block, self._zi, self._alpha_rise, self._alpha_fall, self.output)
 
 
 class PluginFastTimeWeighting(PluginSymmetricTimeWeighting):
@@ -112,40 +100,50 @@ class PluginSquare(PluginTimeWeighting):
         np.square(block, out=self.output)
 
 
-@jit(nopython=True)  # pragma: no cover
-def asymmetric_time_weighting(x, *, zi, alpha_rise, alpha_fall):
+@jit(nopython=True, cache=True)  # pragma: no cover
+def _symmetric_time_weighting(x, zi, alpha, out):
     """
-    Process one block with IEC 61672-1 Impulse time weighting.
+    Process one block with IEC 61672-1 F or S time weighting.
 
     Parameters
     ----------
-    x : ndarray
-        Input block (squared pressure)
-    z : float
-        Filter state (previous output sample)
-    alpha_rise : float
-        Rise coefficient (35 ms)
-    alpha_fall : float
-        Fall coefficient (1500 ms)
+    x   : 2-D array (channels, samples) — raw (unsquared) pressure
+    zi  : 1-D float64 array (channels,) — IIR state per channel
+    alpha : float — IIR coefficient  (= 1 - exp(-1 / (tau * fs)))
+    out : 2-D float64 array (channels, samples) — written in-place
 
-    Returns
-    -------
-    y : ndarray
-        Output block
-    z_new : float
-        Updated filter state
+
     """
-    y = np.zeros_like(x)
-    prev = zi
+    n_ch, n_samp = x.shape
+    one_minus_alpha = 1.0 - alpha
+    for ch in range(n_ch):
+        state = zi[ch]
+        for n in range(n_samp):
+            xn = x[ch, n]
+            state = one_minus_alpha * state + alpha * (xn * xn)
+            out[ch, n] = state
+        zi[ch] = state
 
-    for n in range(len(x)):
-        if x[n] > prev:
-            a = alpha_rise
-        else:
-            a = alpha_fall
 
-        yn = (1.0 - a) * prev + a * x[n]
-        y[n] = yn
-        prev = yn
+@jit(nopython=True, cache=True)  # pragma: no cover
+def _asymmetric_time_weighting(x, zi, alpha_rise, alpha_fall, out):
+    """Process one block with IEC 61672-1 Impulse time weighting.
 
-    return y, prev
+    Parameters
+    ----------
+    x          : 2-D array (channels, samples) — raw (unsquared) pressure
+    zi         : 1-D float64 array (channels,) — IIR state per channel
+    alpha_rise : float — rise coefficient  (= 1 - exp(-1 / (tau_rise * fs)))
+    alpha_fall : float — fall coefficient  (= 1 - exp(-1 / (tau_fall * fs)))
+    out        : 2-D float64 array (channels, samples) — written in-place
+    """
+    n_ch, n_samp = x.shape
+    for ch in range(n_ch):
+        state = zi[ch]
+        for n in range(n_samp):
+            xn = x[ch, n]
+            x2 = xn * xn
+            a = alpha_rise if x2 > state else alpha_fall
+            state = (1.0 - a) * state + a * x2
+            out[ch, n] = state
+        zi[ch] = state

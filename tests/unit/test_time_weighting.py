@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from scipy.signal import lfilter
 
-from slm.time_weighting import asymmetric_time_weighting
+from slm.time_weighting import _asymmetric_time_weighting
 
 FS = 48_000          # sample rate used throughout
 RTOL = 1e-3          # 0.1 % tolerance — tight enough to catch the wrong formula
@@ -66,53 +66,43 @@ def _sym_decay_ratio(tau: float) -> float:
 
 def _asym_rise_ratio(tau_rise: float, tau_fall: float) -> float:
     """
-    Drive the asymmetric filter from 0 with x²=1 for exactly tau_rise seconds,
-    then continue for another tau_rise seconds and record y₁.
-    Returns y₁ / (1 - y₁), normalised to the complement so we can compare
-    rise progress.
-
-    Simpler: just return y(tau_rise) / y_ss where y_ss is approximated from a
-    very long rise phase.  We instead return the ratio y(tau_rise)/y(5*tau_rise)
-    which should equal (1 - e^{-1}) / (1 - e^{-5}) ≈ 0.632 / 0.993 ≈ 0.636.
-
-    Actually, the cleanest check: starting from 0, after tau_rise seconds the
-    output should be (1-e^{-1}) * y_ss.  Approximate y_ss with 10×tau_rise run.
+    Drive the asymmetric filter from 0 with x=1 for exactly tau_rise seconds.
     Returns y(tau_rise) / y_ss.  Expected: (1 - e^{-1}) ≈ 0.6321.
     """
     alpha_rise = 1.0 - np.exp(-1.0 / (tau_rise * FS))
     alpha_fall = 1.0 - np.exp(-1.0 / (tau_fall * FS))
     # Approximate steady-state with a long rise (10×tau_rise)
     n_long = int(10 * tau_rise * FS)
-    y_long, _ = asymmetric_time_weighting(
-        np.ones(n_long), zi=0.0, alpha_rise=alpha_rise, alpha_fall=alpha_fall
-    )
-    y_ss = float(y_long[-1])
-    # Now measure rise from 0 for exactly tau_rise
+    zi = np.zeros(1)
+    out = np.empty((1, n_long))
+    _asymmetric_time_weighting(np.ones((1, n_long)), zi, alpha_rise, alpha_fall, out)
+    y_ss = float(out[0, -1])
+    # Measure rise from 0 for exactly tau_rise
     n = int(tau_rise * FS)
-    y, _ = asymmetric_time_weighting(
-        np.ones(n), zi=0.0, alpha_rise=alpha_rise, alpha_fall=alpha_fall
-    )
-    return float(y[-1]) / y_ss
+    zi = np.zeros(1)
+    out = np.empty((1, n))
+    _asymmetric_time_weighting(np.ones((1, n)), zi, alpha_rise, alpha_fall, out)
+    return float(out[0, -1]) / y_ss
 
 
 def _asym_fall_ratio(tau_rise: float, tau_fall: float) -> float:
     """
     Drive the asymmetric filter toward steady state, record y₀ (last sample of
-    rise), then feed x²=0 for exactly tau_fall seconds and record y₁.
+    rise), then feed x=0 for exactly tau_fall seconds and record y₁.
     Returns y₁ / y₀.  Expected: e^{-1} ≈ 0.3679.
     """
     alpha_rise = 1.0 - np.exp(-1.0 / (tau_rise * FS))
     alpha_fall = 1.0 - np.exp(-1.0 / (tau_fall * FS))
     n_rise = int(5 * tau_rise * FS)
-    y_rise, zi = asymmetric_time_weighting(
-        np.ones(n_rise), zi=0.0, alpha_rise=alpha_rise, alpha_fall=alpha_fall
-    )
-    y0 = float(y_rise[-1])
+    zi = np.zeros(1)
+    out = np.empty((1, n_rise))
+    _asymmetric_time_weighting(np.ones((1, n_rise)), zi, alpha_rise, alpha_fall, out)
+    y0 = float(out[0, -1])
+    # zi is now the final rise state; continue from there into the fall phase
     n_fall = int(tau_fall * FS)
-    y_fall, _ = asymmetric_time_weighting(
-        np.zeros(n_fall), zi=zi, alpha_rise=alpha_rise, alpha_fall=alpha_fall
-    )
-    return float(y_fall[-1]) / y0
+    out = np.empty((1, n_fall))
+    _asymmetric_time_weighting(np.zeros((1, n_fall)), zi, alpha_rise, alpha_fall, out)
+    return float(out[0, -1]) / y0
 
 
 # ---------------------------------------------------------------------------

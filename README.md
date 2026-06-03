@@ -374,10 +374,10 @@ not.
 
 ```bash
 # Quick run — 10 s of audio per cell (~8 min total)
-python tests/benchmark/realtime_load.py --duration 10 --out output/quick
+python tests/benchmark/realtime_benchmark.py --duration 10 --out output/quick
 
 # Full run — 300 s per cell (default)
-python tests/benchmark/realtime_load.py --out output/full
+python tests/benchmark/realtime_benchmark.py --out output/full
 ```
 
 Options:
@@ -396,7 +396,7 @@ Runs a specified cell at real-time pace and counts how many blocks missed their 
 (overruns).  Only meaningful for cells where Quantity A shows ρ near 1.
 
 ```bash
-python tests/benchmark/realtime_load.py --loadouts K2 --blocksizes 256 512 \
+python tests/benchmark/realtime_benchmark.py --loadouts K2 --blocksizes 256 512 \
     --rt-duration 60 --run-b K2:256 K2:512 --out output/rt
 ```
 
