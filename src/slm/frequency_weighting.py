@@ -32,9 +32,6 @@ class PluginFrequencyWeighting(PluginMeter):
     def func(self, block: np.ndarray):
         self.output[0,:], self._zi[:,:] = sosfilt(self._wf, block, zi=self._zi)
 
-    # def implemented_function(self) -> str:
-    #     return f"{self.curve}-weighting"
-
     def to_str(self):
         return f"PluginFrequencyWeighting(curve={self.curve})"
 

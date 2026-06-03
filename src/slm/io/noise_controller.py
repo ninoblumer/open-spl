@@ -53,6 +53,7 @@ class NoiseController(RealtimeController):
         realtime: bool = True,
         queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE,
         seed: int | None = None,
+        n_blocks: int | None = None,
         **kwargs,
     ) -> None:
         if channels > 1:
@@ -68,6 +69,7 @@ class NoiseController(RealtimeController):
         self._channels = channels
         self._realtime = realtime
         self._rng = np.random.default_rng(seed)
+        self._n_blocks = n_blocks
         self._thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
@@ -100,7 +102,11 @@ class NoiseController(RealtimeController):
 
     def _produce(self) -> None:
         t_budget = self._blocksize / self._samplerate
+        pushed = 0
         while not self._stop_event.is_set():
+            if self._n_blocks is not None and pushed >= self._n_blocks:
+                self._stop_event.set()
+                break
             t0 = time.perf_counter()
             block = self._rng.standard_normal(
                 (self._blocksize, self._channels)
@@ -108,6 +114,7 @@ class NoiseController(RealtimeController):
             if self._realtime:
                 try:
                     self._queue.put_nowait(block)
+                    pushed += 1
                 except queue.Full:
                     self._overruns += 1
                 elapsed = time.perf_counter() - t0
@@ -120,6 +127,7 @@ class NoiseController(RealtimeController):
                 while not self._stop_event.is_set():
                     try:
                         self._queue.put(block, timeout=0.1)
+                        pushed += 1
                         break
                     except queue.Full:
                         pass

@@ -8,8 +8,6 @@ from slm.frequency_weighting import PluginFrequencyWeighting, PluginZWeighting
 
 if TYPE_CHECKING:
     from slm.plugin import Plugin, TPlugin
-    from slm.meter import Meter, TMeter
-
 
 
 
@@ -49,16 +47,6 @@ class Bus(ProcessingElement):
             raise Exception(f"Plugin {plugin.bus} does not belong to {self}")
         self.plugins.append(plugin)
         return plugin
-
-
-    # Meters are handled by Plugins
-    # def create_meter(self, plugin: PluginMeter, mtype: type[TMeter], **kwargs) -> TMeter:
-    #     meter = plugin.create_meter(mtype, **kwargs)
-    #     return self.add_meter(meter)
-    #
-    # def add_meter(self, meter: TMeter) -> TMeter:
-    #     self.meters.append(meter)
-    #     return meter
 
 
 

@@ -10,57 +10,10 @@ import argparse
 import cProfile
 import io
 import pstats
-import numpy as np
-
-from slm.io.controller import Controller
 from slm.engine import Engine
 from slm.assembly import parse_metric, build_chain
 from slm.io.reporter import Reporter
-
-
-# ---------------------------------------------------------------------------
-# Synthetic noise controller
-# ---------------------------------------------------------------------------
-
-class NoiseController(Controller):
-    """Generates blocks of white noise indefinitely, stopping after n_blocks."""
-
-    def __init__(self, samplerate: int, blocksize: int, n_blocks: int, sensitivity: float = 1.0):
-        super().__init__()
-        self._samplerate = samplerate
-        self._blocksize = blocksize
-        self._sensitivity = sensitivity
-        self._n_blocks = n_blocks
-        self._block_index = 0
-        rng = np.random.default_rng(42)
-        # Pre-generate all noise to avoid RNG overhead in the hot loop
-        self._noise = rng.standard_normal((n_blocks, blocksize)).astype(np.float32) * 0.01
-
-    @property
-    def samplerate(self) -> int:
-        return self._samplerate
-
-    @property
-    def blocksize(self) -> int:
-        return self._blocksize
-
-    @property
-    def sensitivity(self) -> float:
-        return self._sensitivity
-
-    def read_block(self) -> tuple[np.ndarray, int]:
-        if self._block_index >= self._n_blocks:
-            raise StopIteration
-        block = self._noise[self._block_index]
-        idx = self._block_index
-        self._block_index += 1
-        return block[:, np.newaxis], idx   # shape (blocksize, 1) — matches FileController
-
-    def stop(self):
-        pass
-
-    def calibrate(self, target_spl=94.0):
-        pass
+from slm.io.noise_controller import NoiseController
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +45,11 @@ def run(seconds: float, samplerate: int, blocksize: int):
     print(f"Profiling: {seconds:.0f}s audio | fs={samplerate} | blocksize={blocksize} | "
           f"n_blocks={n_blocks} | {len(METRIC_NAMES)} metrics")
 
-    controller = NoiseController(samplerate=samplerate, blocksize=blocksize, n_blocks=n_blocks)
+    controller = NoiseController(
+        samplerate=samplerate, blocksize=blocksize,
+        n_blocks=n_blocks, realtime=False, seed=42,
+    )
+    controller.set_sensitivity(1.0, unit="V")
     reporter = Reporter(precision=2)
     engine = Engine(controller, dt=0.1, reporter=reporter)
 

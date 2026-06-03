@@ -22,7 +22,6 @@ One-shot measurement::
 from __future__ import annotations
 
 import argparse
-import sys
 
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB
 from slm.io.controller import Controller

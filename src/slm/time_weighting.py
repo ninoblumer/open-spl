@@ -28,7 +28,6 @@ class PluginTimeWeighting(PluginMeter, ABC):
 
 class PluginSymmetricTimeWeighting(PluginTimeWeighting):
     tau: float
-    # function = property(lambda self: f"{self.time_constant}-time-weighting")
 
     def __init__(self, *, time_constant: str, tau: float, **kwargs):
         super().__init__(**kwargs)
@@ -49,7 +48,6 @@ class PluginSymmetricTimeWeighting(PluginTimeWeighting):
 
 class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
     tau: tuple[float, float]
-    # function = property(lambda self: f"{self.time_constant}-time-weighting")
 
     def __init__(self, *, time_constant: str, tau: tuple[float, float], **kwargs):
         super().__init__(**kwargs)

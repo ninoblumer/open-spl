@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 
 class Plugin(ProcessingElement, ABC):
-    # id: str
     bus: "Bus"
     input: "Plugin | Bus"
     output: np.ndarray
