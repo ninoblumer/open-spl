@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import cmd
+import gc
 import math
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
 from slm.io.controller import Controller
 from slm.io.realtime_controller import RealtimeController
+from slm.io.thread_priority import high_priority
 
 if TYPE_CHECKING:
     from slm.app.config import SLMConfig
@@ -165,12 +167,16 @@ def run_measurement(
 
     build_chain(specs, engine)
 
-    try:
-        engine.run()
-    except KeyboardInterrupt:
-        print("Measurement interrupted.")
-    finally:
-        reporter.write(config.output)
+    gc.collect()
+    gc.disable()
+    with high_priority():
+        try:
+            engine.run()
+        except KeyboardInterrupt:
+            print("Measurement interrupted.")
+        finally:
+            gc.enable()
+            reporter.write(config.output)
 
 
 # ---------------------------------------------------------------------------
@@ -223,15 +229,19 @@ def run_noise_measurement(
 
     build_chain(specs, engine)
 
-    try:
-        engine.run()
-    except KeyboardInterrupt:
-        print("\nMeasurement interrupted.")
-        controller.stop()
-    finally:
-        if controller.overruns:
-            print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
-        reporter.write(config.output)
+    gc.collect()
+    gc.disable()
+    with high_priority():
+        try:
+            engine.run()
+        except KeyboardInterrupt:
+            print("\nMeasurement interrupted.")
+            controller.stop()
+        finally:
+            gc.enable()
+            if controller.overruns:
+                print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
+            reporter.write(config.output)
 
 
 def run_realtime_measurement(
@@ -280,15 +290,19 @@ def run_realtime_measurement(
 
     build_chain(specs, engine)
 
-    try:
-        engine.run()
-    except KeyboardInterrupt:
-        print("\nMeasurement interrupted.")
-        controller.stop()
-    finally:
-        if controller.overruns:
-            print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
-        reporter.write(config.output)
+    gc.collect()
+    gc.disable()
+    with high_priority():
+        try:
+            engine.run()
+        except KeyboardInterrupt:
+            print("\nMeasurement interrupted.")
+            controller.stop()
+        finally:
+            gc.enable()
+            if controller.overruns:
+                print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
+            reporter.write(config.output)
 
 
 # ---------------------------------------------------------------------------
