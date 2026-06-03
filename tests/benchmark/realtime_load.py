@@ -19,7 +19,7 @@ Usage
 -----
     python -m slm.tests.realtime_load [--samplerate 48000] [--blocksizes 128 256 …]
         [--loadouts K0 K1 K2] [--duration 300] [--rt-duration 3600]
-        [--out results/] [--run-b K2:256 K2:512]
+        [--out results/] [--run-b K2:256 K2:512] [--skip-a]
 """
 from __future__ import annotations
 
@@ -369,54 +369,70 @@ def _build_parser() -> argparse.ArgumentParser:
             "If omitted entirely, Quantity B is skipped."
         ),
     )
+    p.add_argument(
+        "--skip-a", action="store_true",
+        help=(
+            "Skip Quantity A entirely.  Requires --run-b so that at least one "
+            "quantity is measured."
+        ),
+    )
     return p
 
 
 def main() -> None:
     args = _build_parser().parse_args()
+
+    if args.skip_a and args.run_b is None:
+        sys.exit("--skip-a requires --run-b (nothing to measure otherwise).")
+
     out_dir = Path(args.out)
     blocksizes_sorted = sorted(args.blocksizes)
 
-    # Overhead calibration — once per run
-    print("Calibrating timer overhead …", file=sys.stderr)
-    overhead_s = calibrate_overhead()
-    t_budget_min = min(blocksizes_sorted) / args.samplerate
-    if overhead_s > 0.02 * t_budget_min:
-        print(
-            f"WARNING: perf_counter overhead {overhead_s * 1e6:.1f} µs exceeds 2 % of"
-            f" t_budget for bs={min(blocksizes_sorted)}"
-            f" ({t_budget_min * 1e3:.3f} ms). Load figures for small block"
-            " sizes may be inflated.",
-            file=sys.stderr,
-        )
-    else:
-        print(f"  overhead = {overhead_s * 1e6:.2f} µs  (negligible)", file=sys.stderr)
+    # Overhead calibration — once per run (skipped when A is not measured)
+    overhead_s = 0.0
+    if not args.skip_a:
+        print("Calibrating timer overhead …", file=sys.stderr)
+        overhead_s = calibrate_overhead()
+        t_budget_min = min(blocksizes_sorted) / args.samplerate
+        if overhead_s > 0.02 * t_budget_min:
+            print(
+                f"WARNING: perf_counter overhead {overhead_s * 1e6:.1f} µs exceeds 2 % of"
+                f" t_budget for bs={min(blocksizes_sorted)}"
+                f" ({t_budget_min * 1e3:.3f} ms). Load figures for small block"
+                " sizes may be inflated.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"  overhead = {overhead_s * 1e6:.2f} µs  (negligible)", file=sys.stderr)
 
     # ── Quantity A ──────────────────────────────────────────────────────────
     rows_a: list[dict] = []
-    total_cells = len(args.loadouts) * len(blocksizes_sorted)
-    cell_idx = 0
-    for loadout in args.loadouts:
-        for bs in blocksizes_sorted:
-            cell_idx += 1
-            print(
-                f"[{cell_idx}/{total_cells}] A  {loadout}  bs={bs}"
-                f"  duration={args.duration:.0f}s …",
-                end="  ", flush=True, file=sys.stderr,
-            )
-            row, rho = measure_quantity_a(loadout, bs, args.samplerate,
-                                          args.duration, overhead_s)
-            rows_a.append(row)
-            _write_rho_csv(rho, out_dir / "rho" / f"{loadout}_{bs}.csv")
-            print(
-                f"rho {row['rho_median']:.3f} / {row['rho_p99']:.3f}"
-                f" / {row['rho_max']:.3f}  n={row['block_count']}"
-                + ("  [LOW N — p99 unreliable]" if row["warn_low_n"] else ""),
-                file=sys.stderr,
-            )
+    if args.skip_a:
+        print("Quantity A skipped (--skip-a).", file=sys.stderr)
+    else:
+        total_cells = len(args.loadouts) * len(blocksizes_sorted)
+        cell_idx = 0
+        for loadout in args.loadouts:
+            for bs in blocksizes_sorted:
+                cell_idx += 1
+                print(
+                    f"[{cell_idx}/{total_cells}] A  {loadout}  bs={bs}"
+                    f"  duration={args.duration:.0f}s …",
+                    end="  ", flush=True, file=sys.stderr,
+                )
+                row, rho = measure_quantity_a(loadout, bs, args.samplerate,
+                                              args.duration, overhead_s)
+                rows_a.append(row)
+                _write_rho_csv(rho, out_dir / "rho" / f"{loadout}_{bs}.csv")
+                print(
+                    f"rho {row['rho_median']:.3f} / {row['rho_p99']:.3f}"
+                    f" / {row['rho_max']:.3f}  n={row['block_count']}"
+                    + ("  [LOW N — p99 unreliable]" if row["warn_low_n"] else ""),
+                    file=sys.stderr,
+                )
 
-    _write_csv(rows_a, out_dir / "quantity_a.csv")
-    _print_table_a(rows_a, blocksizes_sorted)
+        _write_csv(rows_a, out_dir / "quantity_a.csv")
+        _print_table_a(rows_a, blocksizes_sorted)
 
     # ── Quantity B ──────────────────────────────────────────────────────────
     if args.run_b is None:
