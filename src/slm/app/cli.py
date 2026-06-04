@@ -641,152 +641,69 @@ When disabled (default), the file is processed as fast as possible.
 
     def do_tree(self, _: str) -> None:
         """tree — print the planned plugin chain for the current metrics."""
-        from slm.assembly import parse_metric
+        from slm.assembly import parse_metric, plan_chain, node_label, meter_class_name
 
         if not self._config.metrics:
             print("No metrics added.  Use: add METRIC")
             return
 
-        specs = []
+        plans = []
         for name in self._config.metrics:
             try:
-                specs.append(parse_metric(name))
+                plans.append(plan_chain(parse_metric(name)))
             except ValueError as exc:
                 print(f"  Error parsing {name!r}: {exc}")
                 return
 
         print(f"Planned chain  (dt={self._config.dt} s)")
 
-        _w_plugin = {
-            "A": "PluginAWeighting",
-            "C": "PluginCWeighting",
-            "Z": "PluginZWeighting",
-        }
-        _tw_plugin = {
-            "F": "PluginFastTimeWeighting",
-            "S": "PluginSlowTimeWeighting",
-            "I": "PluginImpulseTimeWeighting",
-        }
-        _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator",
-                    "last": "LastAccumulatingMeter", "E": "LEAccumulator"}
-        _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter",
-                    "E": "LEMovingMeter"}
+        # Merge the plans into a trie keyed by node dedup key: metrics sharing an
+        # upstream node share a branch — the same prefix-sharing build_chain uses
+        # to dedup plugins.  Each entry holds its NodeReq, child nodes, and the
+        # meters of metrics that terminate at this node.
+        root: dict = {}
+        for plan in plans:
+            children = root
+            entry: dict = {}
+            for node in plan.nodes:
+                entry = children.setdefault(
+                    node.key, {"node": node, "children": {}, "meters": []}
+                )
+                children = entry["children"]
+            entry["meters"].append(plan.meter)
 
-        # Group by weighting
-        by_weight: dict[str, list] = {}
-        for spec in specs:
-            by_weight.setdefault(spec.weighting, []).append(spec)
-
-        def _print_meter(spec, prefix):
-            is_moving = spec.window_is_dt or spec.window_seconds is not None
-            if not is_moving:
-                cls_name = _acc_cls[spec.measure]
+        def _meter_line(meter) -> str:
+            cls = meter_class_name(meter)
+            if not meter.moving:
                 detail = ""
+            elif meter.window_is_dt:
+                detail = f"   t=dt={self._config.dt} s"
             else:
-                cls_name = _mov_cls[spec.measure]
-                if spec.window_is_dt:
-                    detail = f"   t=dt={self._config.dt} s"
+                detail = f"   t={meter.window_seconds} s"
+            return f"{meter.name:<32} {cls}{detail}"
+
+        def _render(node_entry: dict, prefix: str, is_last: bool) -> None:
+            connector = "└── " if is_last else "├── "
+            print(prefix + connector + node_label(node_entry["node"]))
+            child_prefix = prefix + ("    " if is_last else "│   ")
+            # Meters terminating here come first, then downstream plugin nodes.
+            items = ([("meter", m) for m in node_entry["meters"]]
+                     + [("node", c) for c in node_entry["children"].values()])
+            for i, (kind, obj) in enumerate(items):
+                item_last = i == len(items) - 1
+                if kind == "meter":
+                    leaf = "└── " if item_last else "├── "
+                    print(child_prefix + leaf + _meter_line(obj))
                 else:
-                    detail = f"   t={spec.window_seconds} s"
-            print(f"{prefix} {spec.name:<32} {cls_name}{detail}")
+                    _render(obj, child_prefix, item_last)
 
-        weight_keys = list(by_weight.keys())
-        for wi, w in enumerate(weight_keys):
-            is_last_bus = wi == len(weight_keys) - 1
-            bus_pfx = "└──" if is_last_bus else "├──"
-            child_pfx = "    " if is_last_bus else "│   "
-            print(f"{bus_pfx} Bus [{w}]  {_w_plugin[w]}")
-
-            w_specs = by_weight[w]
-
-            # Split specs into groups by upstream plugin type
-            freq_specs = [s for s in w_specs
-                          if s.time_weighting is None and s.bands is None and s.measure != "last"]
-            sq_specs = [s for s in w_specs
-                        if s.time_weighting is None and s.bands is None and s.measure == "last"]
-            tw_groups: dict[str, list] = {}
-            for s in w_specs:
-                if s.time_weighting is not None and s.bands is None:
-                    tw_groups.setdefault(s.time_weighting, []).append(s)
-            # band_groups: keyed by (bands, bpo); value is dict tw_letter→[specs]
-            band_groups: dict[tuple, dict] = {}
-            for s in w_specs:
-                if s.bands is not None:
-                    key = (s.bands, s.bands_per_oct)
-                    tw_key = s.time_weighting or ""
-                    band_groups.setdefault(key, {}).setdefault(tw_key, []).append(s)
-
-            groups: list[tuple[str, list]] = []
-            if freq_specs:
-                groups.append(("freq_weighting", freq_specs))
-            if sq_specs:
-                groups.append(("PluginSquare", sq_specs))
-            for tw_letter, tw_list in tw_groups.items():
-                groups.append((_tw_plugin[tw_letter], tw_list))
-
-            n_band_keys = len(band_groups)
-            n_non_band = len(groups)
-            total_groups = n_non_band + n_band_keys
-
-            for gi, (group_name, group_specs) in enumerate(groups):
-                is_last_group = gi == total_groups - 1
-                grp_pfx = child_pfx + ("└──" if is_last_group else "├──")
-                met_pfx = child_pfx + ("    " if is_last_group else "│   ")
-                print(f"{grp_pfx} {group_name}")
-                for si, spec in enumerate(group_specs):
-                    is_last = si == len(group_specs) - 1
-                    m_pfx = met_pfx + ("└──" if is_last else "├──")
-                    _print_meter(spec, m_pfx)
-
-            for bi, ((bands, bpo), tw_dict) in enumerate(band_groups.items()):
-                gi = n_non_band + bi
-                is_last_group = gi == total_groups - 1
-                grp_pfx = child_pfx + ("└──" if is_last_group else "├──")
-                band_pfx = child_pfx + ("    " if is_last_group else "│   ")
-                bpo_label = "1/3" if bpo == 3.0 else "1/1"
-                print(f"{grp_pfx} PluginOctaveBand  limits=({bands[0]:.0f}, {bands[1]:.0f} Hz)  bpo={bpo_label}")
-
-                tw_keys = list(tw_dict.keys())
-                for ti, tw_key in enumerate(tw_keys):
-                    tw_specs = tw_dict[tw_key]
-                    is_last_tw = ti == len(tw_keys) - 1
-                    if tw_key:
-                        # band + time-weighting: extra level
-                        tw_pfx = band_pfx + ("└──" if is_last_tw else "├──")
-                        met_pfx2 = band_pfx + ("    " if is_last_tw else "│   ")
-                        print(f"{tw_pfx} {_tw_plugin[tw_key]}")
-                        for si, spec in enumerate(tw_specs):
-                            is_last = si == len(tw_specs) - 1
-                            m_pfx = met_pfx2 + ("└──" if is_last else "├──")
-                            _print_meter(spec, m_pfx)
-                    else:
-                        # band only: check if bare "last" metrics need PluginSquare level
-                        last_specs = [s for s in tw_specs if s.measure == "last"]
-                        other_specs = [s for s in tw_specs if s.measure != "last"]
-                        all_sub = []
-                        if other_specs:
-                            all_sub.append(("", other_specs))
-                        if last_specs:
-                            all_sub.append(("sq", last_specs))
-                        for subi, (sub_key, sub_specs) in enumerate(all_sub):
-                            is_last_sub = subi == len(all_sub) - 1 and is_last_tw
-                            if sub_key == "sq":
-                                sq_pfx = band_pfx + ("└──" if is_last_sub else "├──")
-                                sq_met_pfx = band_pfx + ("    " if is_last_sub else "│   ")
-                                print(f"{sq_pfx} PluginSquare")
-                                for si, spec in enumerate(sub_specs):
-                                    is_last = si == len(sub_specs) - 1
-                                    m_pfx = sq_met_pfx + ("└──" if is_last else "├──")
-                                    _print_meter(spec, m_pfx)
-                            else:
-                                for si, spec in enumerate(sub_specs):
-                                    is_last = si == len(sub_specs) - 1 and is_last_sub
-                                    m_pfx = band_pfx + ("└──" if is_last else "├──")
-                                    _print_meter(spec, m_pfx)
+        bus_entries = list(root.values())
+        for i, bus_entry in enumerate(bus_entries):
+            _render(bus_entry, "", i == len(bus_entries) - 1)
 
     def do_inspect(self, arg: str) -> None:
         """inspect METRIC — show detailed human-readable info for a metric."""
-        from slm.assembly import parse_metric
+        from slm.assembly import parse_metric, plan_chain, meter_class_name
 
         name = arg.strip()
         if not name:
@@ -811,20 +728,15 @@ When disabled (default), the file is processed as fast as possible.
             "S": "S (slow, tau=1.0 s)",
             "I": "I (impulse)",
         }
-        _acc_cls = {"eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator",
-                    "last": "LastAccumulatingMeter", "E": "LEAccumulator"}
-        _mov_cls = {"eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter",
-                    "E": "LEMovingMeter"}
 
-        is_moving = spec.window_is_dt or spec.window_seconds is not None
-        if is_moving:
-            meter_cls = _mov_cls[spec.measure]
-            if spec.window_is_dt:
+        meter = plan_chain(spec).meter
+        meter_cls = meter_class_name(meter)
+        if meter.moving:
+            if meter.window_is_dt:
                 window_str = f"t=dt={self._config.dt} s"
             else:
-                window_str = f"t={spec.window_seconds} s"
+                window_str = f"t={meter.window_seconds} s"
         else:
-            meter_cls = _acc_cls[spec.measure]
             window_str = "accumulates whole file"
 
         print(f"  Name:         {spec.name}")
@@ -836,7 +748,7 @@ When disabled (default), the file is processed as fast as possible.
             print(f"  Bands:        {bpo_str}, {spec.bands[0]:.0f} - {spec.bands[1]:.0f} Hz")
         else:
             print(f"  Bands:        broadband")
-        print(f"  Window:       {'moving' if is_moving else 'accumulating'}")
+        print(f"  Window:       {'moving' if meter.moving else 'accumulating'}")
 
     # ------------------------------------------------------------------
     # Workflow help

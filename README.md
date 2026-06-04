@@ -277,6 +277,20 @@ engine.run()
 engine.reporter.write("output/measurement")
 ```
 
+A metric name is parsed in two passes: `parse_metric` produces a `MetricSpec`
+(the parsed name), and `plan_chain` lowers that into a `ChainPlan` — a structural,
+engine-free description of the plugin/meter chain (a tuple of `NodeReq` ending in a
+`MeterReq`). `build_chain` and the REPL `tree`/`inspect` commands are both backends
+over this shared representation, so you can inspect how a metric will be wired
+without constructing an engine:
+
+```python
+from slm import parse_metric, plan_chain
+
+plan = plan_chain(parse_metric("LZFmax:bands:63-8000"))
+print([n.kind for n in plan.nodes])   # ['freq_weighting', 'band', 'time_weighting']
+```
+
 ### Low-level (manual)
 
 ```python

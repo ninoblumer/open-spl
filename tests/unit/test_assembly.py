@@ -490,3 +490,94 @@ class TestSensitivityHelpers:
         assert sensitivity_from_dbv(0.0) == pytest.approx(1.0, rel=1e-10)
         # -20 dBV → 0.1 V
         assert sensitivity_from_dbv(-20.0) == pytest.approx(0.1, rel=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# plan_chain — structural intermediate representation
+# ---------------------------------------------------------------------------
+
+def _collect_meters(engine) -> dict:
+    """Map meter name → meter instance across every bus/plugin in *engine*."""
+    found: dict = {}
+    for bus in engine._busses.values():
+        for plugin in bus.plugins:
+            for mname, meter in getattr(plugin, "meters", {}).items():
+                found[mname] = meter
+    return found
+
+
+def _build_only(tmp_path: Path, names: list[str]):
+    """Write a sine, build the chain (without running), return the engine."""
+    wav = tmp_path / "sine.wav"
+    _write_sine(wav)
+    controller = FileController(str(wav), blocksize=1024)
+    controller.set_sensitivity(1.0, unit="V")
+    engine = Engine(controller, dt=10.0, reporter=Reporter())
+    build_chain([parse_metric(n) for n in names], engine)
+    return engine
+
+
+class TestPlanChain:
+
+    @pytest.mark.parametrize("name,kinds", [
+        ("LAeq",                    ["freq_weighting"]),
+        ("LAeq_dt",                 ["freq_weighting"]),
+        ("LAFmax",                  ["freq_weighting", "time_weighting"]),
+        ("LAF",                     ["freq_weighting", "time_weighting"]),  # bare + TW → TW node
+        ("LA",                      ["freq_weighting", "square"]),          # bare, no TW → square
+        ("LZeq:bands:63-8000",      ["freq_weighting", "band"]),
+        ("LZFmax:bands:63-8000",    ["freq_weighting", "band", "time_weighting"]),
+        ("LZ:bands:63-8000",        ["freq_weighting", "band", "square"]),  # bare per-band → square
+    ])
+    def test_node_kinds(self, name, kinds):
+        from slm.assembly import plan_chain
+        plan = plan_chain(parse_metric(name))
+        assert [n.kind for n in plan.nodes] == kinds
+        assert plan.name == name
+
+    def test_meter_fields(self):
+        from slm.assembly import plan_chain
+        # accumulating broadband eq
+        m = plan_chain(parse_metric("LAeq")).meter
+        assert (m.measure, m.moving, m.is_band) == ("eq", False, False)
+        # moving via _dt
+        m = plan_chain(parse_metric("LAeq_dt")).meter
+        assert m.moving and m.window_is_dt and m.window_seconds is None
+        # moving via explicit window
+        m = plan_chain(parse_metric("LAeq_30s")).meter
+        assert m.moving and not m.window_is_dt and m.window_seconds == 30.0
+        # band metric flags is_band
+        assert plan_chain(parse_metric("LZeq:bands:63-8000")).meter.is_band
+
+    def test_dedup_keys_shared(self):
+        from slm.assembly import plan_chain
+        bus_a = plan_chain(parse_metric("LAeq")).nodes[0].key
+        # LAFmax and LAF share both the bus node and the fast-TW node
+        lafmax = plan_chain(parse_metric("LAFmax")).nodes
+        laf = plan_chain(parse_metric("LAF")).nodes
+        assert lafmax[0].key == bus_a == laf[0].key
+        assert lafmax[1].key == laf[1].key            # shared PluginFastTimeWeighting
+        # a band node is shared between an eq and a max metric on the same band
+        band_eq = plan_chain(parse_metric("LZeq:bands:63-8000")).nodes[1].key
+        band_max = plan_chain(parse_metric("LZFmax:bands:63-8000")).nodes[1].key
+        assert band_eq == band_max
+
+    def test_meter_class_name_matches_build_chain(self, tmp_path):
+        """Oracle: the IR's meter class equals what build_chain actually wires."""
+        from slm.assembly import plan_chain, meter_class_name
+        names = ["LAeq", "LAeq_dt", "LAeq_30s", "LAFmax", "LASmin",
+                 "LAF", "LZeq:bands:63-8000", "LZFmax:bands:63-8000"]
+        engine = _build_only(tmp_path, names)
+        meters = _collect_meters(engine)
+        for name in names:
+            plan = plan_chain(parse_metric(name))
+            assert type(meters[name]).__name__ == meter_class_name(plan.meter), name
+
+    def test_node_and_meter_labels(self):
+        from slm.assembly import plan_chain, node_label, meter_class_name
+        plan = plan_chain(parse_metric("LZFmax:bands:1/3:31-16000"))
+        labels = [node_label(n) for n in plan.nodes]
+        assert labels[0] == "Bus [Z]  PluginZWeighting"
+        assert labels[1].startswith("PluginOctaveBand") and "bpo=1/3" in labels[1]
+        assert labels[2] == "PluginFastTimeWeighting"
+        assert meter_class_name(plan.meter) == "MaxAccumulator"

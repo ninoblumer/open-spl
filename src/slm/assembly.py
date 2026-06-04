@@ -171,6 +171,193 @@ def parse_metric(name: str) -> MetricSpec:
 
 
 # ---------------------------------------------------------------------------
+# ChainPlan — structural intermediate representation
+# ---------------------------------------------------------------------------
+
+# Display names mapping structural node / meter kinds to the class that
+# implements them, as *strings*.  build_chain holds the parallel kind -> class
+# mapping for actual instantiation; these string versions drive read-only
+# renderers (the REPL ``tree`` / ``inspect`` commands) without importing any
+# plugin classes.
+_WEIGHTING_PLUGIN_NAME: dict[str, str] = {
+    "A": "PluginAWeighting",
+    "C": "PluginCWeighting",
+    "Z": "PluginZWeighting",
+}
+_TIME_WEIGHTING_PLUGIN_NAME: dict[str, str] = {
+    "F": "PluginFastTimeWeighting",
+    "S": "PluginSlowTimeWeighting",
+    "I": "PluginImpulseTimeWeighting",
+}
+_ACC_METER_NAME: dict[str, str] = {
+    "eq": "LeqAccumulator", "max": "MaxAccumulator", "min": "MinAccumulator",
+    "last": "LastAccumulatingMeter", "E": "LEAccumulator",
+}
+_MOV_METER_NAME: dict[str, str] = {
+    "eq": "LeqMovingMeter", "max": "MaxMovingMeter", "min": "MinMovingMeter",
+    "E": "LEMovingMeter",
+}
+
+
+@dataclass(frozen=True)
+class NodeReq:
+    """One node in a metric's processing chain, from the frequency-weighting bus
+    down to the terminal plugin the meter attaches to.
+
+    Structural only: a :class:`NodeReq` carries node *kinds* and parameters, not
+    plugin classes or runtime values (samplerate, ``dt``).  This lets a
+    :class:`ChainPlan` be built from a :class:`MetricSpec` alone — no engine —
+    which is what the REPL preview (``tree``) needs.  The :attr:`key` is a
+    hashable dedup identifier: two metrics whose chains share a node share its
+    key, so the same upstream plugin is created once.
+    """
+
+    kind: str
+    """Node kind: ``'freq_weighting'``, ``'band'``, ``'time_weighting'``, ``'square'``."""
+
+    key: tuple
+    """Hashable dedup key, unique across the whole set of chains."""
+
+    weighting: str
+    """Frequency-weighting letter the node lives under (``'A'``/``'C'``/``'Z'``)."""
+
+    bands: tuple[float, float] | None = None
+    """``(fmin, fmax)`` for band / band-derived nodes, else ``None``."""
+
+    bands_per_oct: float | None = None
+    """Filter density for band / band-derived nodes, else ``None``."""
+
+    time_weighting: str | None = None
+    """Time-weighting letter for ``'time_weighting'`` nodes, else ``None``."""
+
+
+@dataclass(frozen=True)
+class MeterReq:
+    """The terminal meter of a chain — what to read and how to aggregate it."""
+
+    measure: str
+    """Aggregation kind: ``'eq'``/``'max'``/``'min'``/``'last'``/``'E'``."""
+
+    moving: bool
+    """``True`` for a moving-window meter, ``False`` for an accumulating one."""
+
+    window_is_dt: bool
+    """``True`` when the moving window is the engine block interval (``_dt``)."""
+
+    window_seconds: float | None
+    """Explicit moving-window length in seconds, or ``None``."""
+
+    name: str
+    """Metric name — used both as the meter name and the report-column label."""
+
+    is_band: bool
+    """``True`` for a per-band metric (the report column needs centre frequencies)."""
+
+
+@dataclass(frozen=True)
+class ChainPlan:
+    """Structural plan for one metric: the ordered node path plus its meter.
+
+    Produced by :func:`plan_chain` and consumed by every chain *backend* —
+    :func:`build_chain` (instantiation) and the REPL ``tree``/``inspect``
+    renderers.  The terminal plugin is the last entry of :attr:`nodes`; the
+    meter attaches there.
+    """
+
+    name: str
+    """Metric name, e.g. ``'LAFmax'``."""
+
+    nodes: tuple[NodeReq, ...]
+    """Chain path from the frequency-weighting bus to the terminal plugin."""
+
+    meter: MeterReq
+    """The meter created on the terminal node."""
+
+
+def plan_chain(spec: MetricSpec) -> ChainPlan:
+    """Lower a :class:`MetricSpec` into a structural :class:`ChainPlan`.
+
+    Pure function of the spec — needs no engine, samplerate, or ``dt`` — so it
+    can run at REPL-preview time.  The node sequence mirrors the wiring resolved
+    by :func:`build_chain`:
+
+    - always a ``freq_weighting`` node (the bus);
+    - then an optional ``band`` node for per-band metrics;
+    - then an optional ``time_weighting`` node (F/S/I) or ``square`` node (bare
+      metrics, which need Pa² input);
+
+    with the meter attached to whichever node ends up last.
+    """
+    w = spec.weighting
+    nodes: list[NodeReq] = [
+        NodeReq(kind="freq_weighting", key=("bus", w), weighting=w)
+    ]
+
+    if spec.bands is not None:
+        nodes.append(NodeReq(
+            kind="band", key=("band", w, spec.bands, spec.bands_per_oct),
+            weighting=w, bands=spec.bands, bands_per_oct=spec.bands_per_oct,
+        ))
+        if spec.time_weighting is not None:
+            nodes.append(NodeReq(
+                kind="time_weighting",
+                key=("band_tw", w, spec.bands, spec.bands_per_oct, spec.time_weighting),
+                weighting=w, bands=spec.bands, bands_per_oct=spec.bands_per_oct,
+                time_weighting=spec.time_weighting,
+            ))
+        elif spec.measure == "last":
+            nodes.append(NodeReq(
+                kind="square", key=("band_sq", w, spec.bands, spec.bands_per_oct),
+                weighting=w, bands=spec.bands, bands_per_oct=spec.bands_per_oct,
+            ))
+    elif spec.time_weighting is not None:
+        nodes.append(NodeReq(
+            kind="time_weighting", key=("tw", w, spec.time_weighting),
+            weighting=w, time_weighting=spec.time_weighting,
+        ))
+    elif spec.measure == "last":
+        nodes.append(NodeReq(kind="square", key=("sq", w), weighting=w))
+
+    moving = spec.window_is_dt or spec.window_seconds is not None
+    meter = MeterReq(
+        measure=spec.measure, moving=moving,
+        window_is_dt=spec.window_is_dt, window_seconds=spec.window_seconds,
+        name=spec.name, is_band=spec.bands is not None,
+    )
+    return ChainPlan(name=spec.name, nodes=tuple(nodes), meter=meter)
+
+
+def _bpo_label(bands_per_oct: float | None) -> str:
+    """Return a ``'1/N'`` fraction label for a bands-per-octave value."""
+    if bands_per_oct is None:
+        return ""
+    if float(bands_per_oct).is_integer():
+        return f"1/{int(bands_per_oct)}"
+    return f"{bands_per_oct:g}/oct"
+
+
+def node_label(node: NodeReq) -> str:
+    """Human-readable one-line label for a chain node (REPL renderers)."""
+    if node.kind == "freq_weighting":
+        return f"Bus [{node.weighting}]  {_WEIGHTING_PLUGIN_NAME[node.weighting]}"
+    if node.kind == "band":
+        assert node.bands is not None
+        return (f"PluginOctaveBand  limits=({node.bands[0]:.0f}, {node.bands[1]:.0f} Hz)"
+                f"  bpo={_bpo_label(node.bands_per_oct)}")
+    if node.kind == "time_weighting":
+        assert node.time_weighting is not None
+        return _TIME_WEIGHTING_PLUGIN_NAME[node.time_weighting]
+    if node.kind == "square":
+        return "PluginSquare"
+    raise ValueError(f"Unknown node kind: {node.kind!r}")  # pragma: no cover
+
+
+def meter_class_name(meter: MeterReq) -> str:
+    """Return the meter class name a :class:`MeterReq` maps to."""
+    return (_MOV_METER_NAME if meter.moving else _ACC_METER_NAME)[meter.measure]
+
+
+# ---------------------------------------------------------------------------
 # build_chain
 # ---------------------------------------------------------------------------
 
