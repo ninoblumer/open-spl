@@ -135,6 +135,47 @@ def calibrate_from_device(
 
 
 # ---------------------------------------------------------------------------
+# Shared engine runner
+# ---------------------------------------------------------------------------
+
+def _run_engine(
+    controller: Controller,
+    config: "SLMConfig",
+    print_to_console: bool = False,
+    display_mode: str = "plain",
+) -> None:
+    """Build and run the engine for *controller*; write results on exit."""
+    from slm.assembly import parse_metric, build_chain
+    from slm.engine import Engine
+    from slm.io.reporter import Reporter
+    from slm.io.display import make_display_fn
+    from slm.io.realtime_controller import RealtimeController
+
+    rt = controller if isinstance(controller, RealtimeController) else None
+
+    specs = [parse_metric(m) for m in config.metrics]
+    display_fn = make_display_fn(display_mode, precision=2, controller=rt) if print_to_console else None
+    reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
+    engine = Engine(controller, dt=config.dt, reporter=reporter)
+    build_chain(specs, engine)
+
+    gc.collect()
+    gc.disable()
+    with high_priority():
+        try:
+            engine.run()
+        except KeyboardInterrupt:
+            print("\nMeasurement interrupted.")
+            if rt is not None:
+                rt.stop()
+        finally:
+            gc.enable()
+            if rt is not None and rt.overruns:
+                print(f"Warning: {rt.overruns} block(s) dropped (engine too slow).")
+            reporter.write(config.output)
+
+
+# ---------------------------------------------------------------------------
 # One-shot measurement
 # ---------------------------------------------------------------------------
 
@@ -150,33 +191,11 @@ def run_measurement(
     """Parse *config.metrics*, build the plugin chain, run the engine, write results."""
     if sensitivity_v <= 0:
         raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
-    from slm.assembly import parse_metric, build_chain
     from slm.io.file_controller import FileController
-    from slm.engine import Engine
-    from slm.io.reporter import Reporter
-    from slm.io.display import make_display_fn
-
-    specs = [parse_metric(m) for m in config.metrics]
 
     controller = FileController(str(wav_path), blocksize=blocksize, realtime=realtime)
     controller.set_sensitivity(sensitivity_v, unit="V")
-
-    display_fn = make_display_fn(display_mode, precision=2) if print_to_console else None
-    reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
-    engine = Engine(controller, dt=config.dt, reporter=reporter)
-
-    build_chain(specs, engine)
-
-    gc.collect()
-    gc.disable()
-    with high_priority():
-        try:
-            engine.run()
-        except KeyboardInterrupt:
-            print("Measurement interrupted.")
-        finally:
-            gc.enable()
-            reporter.write(config.output)
+    _run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -198,13 +217,7 @@ def run_noise_measurement(
     """
     if sensitivity_v <= 0:
         raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
-    from slm.assembly import parse_metric, build_chain
     from slm.io.noise_controller import NoiseController
-    from slm.engine import Engine
-    from slm.io.reporter import Reporter
-    from slm.io.display import make_display_fn
-
-    specs = [parse_metric(m) for m in config.metrics]
 
     controller = NoiseController(
         samplerate=samplerate, blocksize=blocksize,
@@ -212,36 +225,13 @@ def run_noise_measurement(
     )
     controller.set_sensitivity(sensitivity_v, unit="V")
     controller.start()
-
     print(
         f"  Source: white-noise generator  |  "
         f"Sample rate: {samplerate} Hz  |  "
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-
-    display_fn = (
-        make_display_fn(display_mode, precision=2, controller=controller)
-        if print_to_console else None
-    )
-    reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
-    engine = Engine(controller, dt=config.dt, reporter=reporter)
-
-    build_chain(specs, engine)
-
-    gc.collect()
-    gc.disable()
-    with high_priority():
-        try:
-            engine.run()
-        except KeyboardInterrupt:
-            print("\nMeasurement interrupted.")
-            controller.stop()
-        finally:
-            gc.enable()
-            if controller.overruns:
-                print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
-            reporter.write(config.output)
+    _run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
 
 
 def run_realtime_measurement(
@@ -260,13 +250,7 @@ def run_realtime_measurement(
     """
     if sensitivity_v <= 0:
         raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
-    from slm.assembly import parse_metric, build_chain
     from slm.io.sounddevice_controller import SounddeviceController
-    from slm.engine import Engine
-    from slm.io.reporter import Reporter
-    from slm.io.display import make_display_fn
-
-    specs = [parse_metric(m) for m in config.metrics]
 
     controller = SounddeviceController(
         device=device, samplerate=samplerate, blocksize=blocksize,
@@ -274,35 +258,12 @@ def run_realtime_measurement(
     )
     controller.set_sensitivity(sensitivity_v, unit="V")
     controller.start()
-
     print(
         f"  Sample rate: {samplerate} Hz  |  "
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-
-    display_fn = (
-        make_display_fn(display_mode, precision=2, controller=controller)
-        if print_to_console else None
-    )
-    reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
-    engine = Engine(controller, dt=config.dt, reporter=reporter)
-
-    build_chain(specs, engine)
-
-    gc.collect()
-    gc.disable()
-    with high_priority():
-        try:
-            engine.run()
-        except KeyboardInterrupt:
-            print("\nMeasurement interrupted.")
-            controller.stop()
-        finally:
-            gc.enable()
-            if controller.overruns:
-                print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
-            reporter.write(config.output)
+    _run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
 
 
 # ---------------------------------------------------------------------------
