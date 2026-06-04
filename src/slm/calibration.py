@@ -1,7 +1,60 @@
-"""Core calibration routine — controller-agnostic."""
+"""Core calibration routine — controller-agnostic.
+
+Calibration follows IEC 61672-1's two steps: **measure** the calibrator tone,
+then **adjust** the sensitivity.  :func:`calibrate_sensitivity` is the measure
+step — it returns the sensitivity the tone implies without mutating anything; the
+caller performs the adjust step (``controller.set_sensitivity(...)`` or storing
+the value for later measurements).
+"""
 from __future__ import annotations
 
+from collections import deque
+from typing import TYPE_CHECKING
+
+import numpy as np
+
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
+
+if TYPE_CHECKING:
+    from datetime import timedelta
+
+    from slm.io.controller import Controller
+    from slm.plugin_meter import PluginMeter
+
+
+class _StabilityMonitor:
+    """``on_record`` observer that auto-stops a real-time calibration.
+
+    The engine fires ``on_record`` every block; this monitor samples the moving
+    Leq once per *dt* seconds (gating the per-block ticks itself), keeps a rolling
+    window of *window* readings, and stops the controller once their standard
+    deviation falls below *threshold* dB — i.e. the tone has settled.
+    """
+
+    def __init__(self, plugin: "PluginMeter", meter_name: str, controller: "Controller",
+                 *, window: int, threshold: float, dt: float) -> None:
+        self._plugin = plugin
+        self._meter_name = meter_name
+        self._controller = controller
+        self._window = window
+        self._threshold = threshold
+        self._dt = dt
+        self._history: deque[float] = deque(maxlen=window)
+        self._last_sample: "timedelta | None" = None
+
+    def __call__(self, timestamp: "timedelta", dt: float) -> None:
+        # Gate the per-block ticks down to one reading per dt seconds.
+        if (self._last_sample is not None
+                and (timestamp - self._last_sample).total_seconds() < self._dt):
+            return
+        self._last_sample = timestamp
+
+        val_sq = self._plugin.read_lin(self._meter_name)[0]
+        if val_sq > 0:
+            self._history.append(10.0 * np.log10(val_sq / REFERENCE_PRESSURE ** 2))
+        if (len(self._history) == self._window
+                and float(np.std(self._history)) < self._threshold):
+            self._controller.stop()
 
 
 def calibrate_sensitivity(
@@ -11,15 +64,18 @@ def calibrate_sensitivity(
     stability_window: int | None = None,
     stability_threshold: float = 0.1,
 ) -> float:
-    """Derive controller sensitivity from a known-level calibrator tone.
+    """Measure a calibrator tone and return the sensitivity it implies (V/Pa).
 
-    Builds an Engine/Bus pipeline with a bandpass filter at *cal_freq*, runs it
-    against the provided controller, then derives the sensitivity from the
-    measured RMS and the expected pressure level.
+    This is the **measure** half of calibration: it bandpass-filters the input at
+    *cal_freq*, integrates the tone's RMS at the controller's current (raw)
+    sensitivity, and returns the sensitivity that would make that tone read
+    *cal_level* dB.  It does **not** mutate the controller — the caller performs
+    the **adjust** step::
 
-    The controller must already have its raw sensitivity set (e.g. 1.0 V) before
-    calling this function.  Returns a value suitable for
-    ``controller.set_sensitivity(result, unit="V")``.
+        proposed = calibrate_sensitivity(controller)     # step 1: measure
+        controller.set_sensitivity(proposed, unit="V")   # step 2: adjust
+
+    The controller must have a raw sensitivity set (e.g. 1.0 V) beforehand.
 
     Parameters
     ----------
@@ -30,48 +86,23 @@ def calibrate_sensitivity(
     cal_level:
         Known SPL of the calibrator tone in dB (default 94.0).
     stability_window:
-        When ``None`` (default) the engine runs until the controller raises
-        ``StopIteration`` — suitable for file-based controllers.  When set to
-        an integer *N*, a rolling window of *N* half-second Leq readings is
-        tracked; the controller is stopped automatically once the standard
-        deviation of those readings drops below *stability_threshold* dB.
-        Use this for real-time controllers where there is no natural end.
+        ``None`` (default) runs until the controller raises ``StopIteration``
+        (file sources).  An integer *N* enables auto-stop for real-time sources:
+        a :class:`_StabilityMonitor` (an ``on_record`` observer) samples the
+        moving Leq every 0.5 s and stops once *N* readings agree within
+        *stability_threshold* dB.
     stability_threshold:
-        Maximum rolling standard deviation (dB) to consider the tone stable
-        (default 0.1 dB).  Only used when *stability_window* is not ``None``.
+        Max rolling standard deviation (dB) considered stable (default 0.1).
+        Only used when *stability_window* is given.
     """
-    from collections import deque
-
-    import numpy as np
-
     from slm.engine import Engine
     from slm.frequency_weighting import PluginZWeighting, PluginBandpass
     from slm.meter import LeqAccumulator, LeqMovingMeter
 
     use_stability = stability_window is not None
-    dt = 0.5 if use_stability else 1e9   # dt=1e9 → no snapshot fires (file path)
+    dt = 0.5   # stability sampling cadence (no observer is attached on the file path)
 
-    if use_stability:
-        _history: deque[float] = deque(maxlen=stability_window)
-        _last_sample = None   # timestamp of the last sample (the engine ticks every block)
-
-        def _on_record(timestamp, _dt):
-            # The engine fires on_record every block; gate to the dt cadence so a
-            # stability "reading" is one moving-Leq sample per dt seconds.
-            nonlocal _last_sample
-            if _last_sample is not None and (timestamp - _last_sample).total_seconds() < dt:
-                return
-            _last_sample = timestamp
-            val_sq = bp.read_lin("leq_moving")[0]
-            if val_sq > 0:
-                _history.append(10.0 * np.log10(val_sq / REFERENCE_PRESSURE ** 2))
-            if (len(_history) == stability_window
-                    and float(np.std(_history)) < stability_threshold):
-                controller.stop()
-
-        engine = Engine(controller, dt=dt, on_record=_on_record)
-    else:
-        engine = Engine(controller, dt=dt)
+    engine = Engine(controller, dt=dt)
     bus = engine.add_bus("cal", PluginZWeighting)
     bp = PluginBandpass(fc=cal_freq, input=bus.frequency_weighting, width=1, bus=bus)
     bus.add_plugin(bp)
@@ -79,6 +110,10 @@ def calibrate_sensitivity(
 
     if use_stability:
         bp.create_meter(LeqMovingMeter, name="leq_moving", t=1.0)
+        engine.on_record = _StabilityMonitor(
+            bp, "leq_moving", controller,
+            window=stability_window, threshold=stability_threshold, dt=dt,
+        )
 
     engine.run()
 
