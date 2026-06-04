@@ -145,8 +145,7 @@ def _run_engine(
     display_mode: str = "plain",
 ) -> None:
     """Build and run the engine for *controller*; write results on exit."""
-    from slm.assembly import parse_metric, build_chain
-    from slm.engine import Engine
+    from slm.assembly import parse_metric, assemble_engine
     from slm.io.reporter import Reporter
     from slm.io.display import make_display_fn
     from slm.io.realtime_controller import RealtimeController
@@ -156,8 +155,9 @@ def _run_engine(
     specs = [parse_metric(m) for m in config.metrics]
     display_fn = make_display_fn(display_mode, precision=2, controller=rt) if print_to_console else None
     reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
-    engine = Engine(controller, dt=config.dt, reporter=reporter)
-    build_chain(specs, engine)
+    engine, bindings = assemble_engine(specs, controller, dt=config.dt)
+    reporter.add_columns(bindings)
+    engine.on_record = reporter.record
 
     gc.collect()
     gc.disable()

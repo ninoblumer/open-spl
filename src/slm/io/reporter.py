@@ -48,6 +48,14 @@ class Reporter:
                 )
             self._band_columns.append((label, plugin, meter_name, center_frequencies))
 
+    def add_columns(self, bindings) -> None:
+        """Register every column in *bindings* (an iterable of objects with
+        ``label``/``plugin``/``meter_name``/``center_frequencies`` — see
+        :class:`slm.assembly.ColumnBinding`)."""
+        for b in bindings:
+            self.add_column(b.label, b.plugin, b.meter_name,
+                            center_frequencies=b.center_frequencies)
+
     def record(self, timestamp: timedelta, dt: float) -> None:
         """Sample all registered meters and append rows if dt has elapsed since last log."""
         if self._last_log is not None and (timestamp - self._last_log).total_seconds() < dt:

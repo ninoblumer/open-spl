@@ -1,14 +1,24 @@
 from __future__ import annotations
 import warnings
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from slm.bus import Bus
-from slm.io.reporter import Reporter
 
 if TYPE_CHECKING:
     from slm.frequency_weighting import PluginFrequencyWeighting
     from slm.io.controller import Controller
+
+
+# A record callback is invoked once per processed block with (timestamp, dt).  It
+# is how the engine signals "snapshot now" to a sink (e.g. a Reporter) without
+# knowing what the sink is.  The default is a no-op, so an engine with no sink
+# attached simply runs and updates its meters.
+RecordCallback = Callable[[timedelta, float], None]
+
+
+def _noop_record(timestamp: timedelta, dt: float) -> None:
+    pass
 
 
 class Engine:
@@ -18,11 +28,13 @@ class Engine:
     dt: float = property(lambda self: self._dt)
 
     def __init__(self, controller, dt: float = 0.1,
-                 reporter: Reporter | None = None):
+                 on_record: "RecordCallback | None" = None):
         self._controller: Controller = controller
         self._busses: dict[str, Bus] = dict()
         self._dt = dt
-        self.reporter: Reporter = reporter or Reporter()
+        # Sink callback invoked each block; the director (or a test) may also
+        # assign ``engine.on_record`` after construction.  Defaults to a no-op.
+        self.on_record: RecordCallback = on_record or _noop_record
 
     def add_bus(self, name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None) -> Bus:
         bus = Bus(engine=self, name=name, frequency_weighting=frequency_weighting)
@@ -54,7 +66,7 @@ class Engine:
         # Force a final snapshot so the report always reflects the fully-accumulated state,
         # even when the file duration is not an exact multiple of dt.
         if self._last_timestamp is not None:
-            self.reporter.record(self._last_timestamp, 0)
+            self.on_record(self._last_timestamp, 0)
 
     def _process_block(self) -> None:
         block, block_index = self._controller.read_block()
@@ -72,7 +84,7 @@ class Engine:
 
         timestamp = timedelta(seconds=block_index * self.blocksize / self.samplerate)
         self._last_timestamp = timestamp
-        self.reporter.record(timestamp, self._dt)
+        self.on_record(timestamp, self._dt)
 
     def stop(self):
         self._controller.stop()

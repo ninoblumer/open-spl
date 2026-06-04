@@ -289,8 +289,10 @@ class TestEngineIntegration:
             ctrl.start()
 
             reporter = Reporter(precision=2)
-            engine = Engine(ctrl, dt=0.1, reporter=reporter)
-            build_chain([parse_metric("LAeq")], engine)
+            engine = Engine(ctrl, dt=0.1)
+            bindings = build_chain([parse_metric("LAeq")], engine)
+            reporter.add_columns(bindings)
+            engine.on_record = reporter.record
 
             engine.run()
 

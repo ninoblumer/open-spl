@@ -171,14 +171,12 @@ class TestEngineIntegration:
     def test_engine_processes_blocks(self):
         from slm.engine import Engine
         from slm.assembly import parse_metric, build_chain
-        from slm.io.reporter import Reporter
 
         ctrl = _make_controller(samplerate=48_000, blocksize=1_024, queue_maxsize=16)
         ctrl.set_sensitivity(1.0, unit="V")
         ctrl.start()
 
-        reporter = Reporter(precision=2)
-        engine = Engine(ctrl, dt=0.5, reporter=reporter)
+        engine = Engine(ctrl, dt=0.5)
         build_chain([parse_metric("LAeq")], engine)
 
         # Read 20 blocks then stop

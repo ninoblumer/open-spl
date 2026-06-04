@@ -81,17 +81,17 @@ DEFAULT_BLOCKSIZES: list[int] = [128, 256, 512, 1024, 4096]
 def _make_engine(loadout_name: str, blocksize: int, samplerate: int,
                  dt: float = 1.0, realtime: bool = False):
     from slm.io.noise_controller import NoiseController
-    from slm.engine import Engine
     from slm.io.reporter import Reporter
-    from slm.assembly import parse_metric, build_chain
+    from slm.assembly import parse_metric, assemble_engine
 
     controller = NoiseController(samplerate=samplerate, blocksize=blocksize,
                                   realtime=realtime)
     controller.set_sensitivity(1.0, unit="V")
-    reporter = Reporter()
-    engine = Engine(controller, dt=dt, reporter=reporter)
     specs = [parse_metric(m) for m in LOADOUTS[loadout_name]]
-    build_chain(specs, engine)
+    engine, bindings = assemble_engine(specs, controller, dt=dt)
+    reporter = Reporter()
+    reporter.add_columns(bindings)
+    engine.on_record = reporter.record
     return engine, controller, reporter
 
 

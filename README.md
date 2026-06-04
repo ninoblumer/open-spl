@@ -213,17 +213,20 @@ Reporter ◄──────────────────────�
 
 **Key components:**
 
-- **`Engine`** — main processing loop; owns buses; calls `reporter.record()` every `dt` seconds
+- **`Engine`** — main processing loop; owns buses; emits an `on_record(timestamp, dt)` tick each block to a sink callback (it holds no reference to the reporter)
 - **`Bus`** — one frequency weighting + a chain of downstream plugins and meters
 - **`PluginAWeighting` / `PluginCWeighting` / `PluginZWeighting`** — IIR frequency-weighting filters
 - **`PluginFastTimeWeighting` / `PluginSlowTimeWeighting`** — exponential time-weighting filters
 - **`PluginOctaveBand`** — arbitrary N/M-octave filter bank; outputs N channels
 - **`LeqAccumulator` / `MaxAccumulator`** — whole-file/stream integrating meters
 - **`LeqMovingMeter` / `MaxMovingMeter`** — sliding-window meters
-- **`Reporter`** — collects meter readings and writes CSV output
+- **`Reporter`** — a sink: columns registered via `add_columns` are sampled when `engine.on_record` fires, then written as CSV
 
-`build_chain()` in `slm/assembly.py` constructs and wires up the above components from a list
-of metric name strings, reusing shared buses and plugins where possible.
+`assemble_engine()` in `slm/assembly.py` is the factory that builds an engine and wires the
+above components from a list of metric specs, returning `(engine, bindings)`; the caller
+attaches a sink with `reporter.add_columns(bindings)` and `engine.on_record = reporter.record`.
+Internally each metric is lowered `parse_metric → MetricSpec → plan_chain → ChainPlan`, and
+`build_chain` walks that IR, reusing shared buses and plugins.
 
 ---
 
@@ -262,19 +265,21 @@ run_realtime_measurement(sens, config, device=0, samplerate=48_000, print_to_con
 ### Mid-level (declarative)
 
 ```python
-from slm import Engine, build_chain, parse_metric
-from slm.io import FileController
+from slm import assemble_engine, parse_metric
+from slm.io import FileController, Reporter
 
 controller = FileController("recording.wav", blocksize=1024)
 controller.set_sensitivity(sens, unit="V")
 
-engine = Engine(controller, dt=1.0)
-
 specs = [parse_metric(m) for m in ["LAeq", "LAFmax", "LZeq:bands:63-8000"]]
-build_chain(specs, engine)
+engine, bindings = assemble_engine(specs, controller, dt=1.0)
+
+reporter = Reporter()
+reporter.add_columns(bindings)        # what to read
+engine.on_record = reporter.record    # when to read
 
 engine.run()
-engine.reporter.write("output/measurement")
+reporter.write("output/measurement")
 ```
 
 A metric name is parsed in two passes: `parse_metric` produces a `MetricSpec`
@@ -295,7 +300,7 @@ print([n.kind for n in plan.nodes])   # ['freq_weighting', 'band', 'time_weighti
 
 ```python
 from slm import Engine
-from slm.io import FileController
+from slm.io import FileController, Reporter
 from slm.frequency_weighting import PluginAWeighting
 from slm.time_weighting import PluginFastTimeWeighting
 from slm.meter import LeqAccumulator, MaxAccumulator
@@ -311,11 +316,13 @@ laf = bus_a.add_plugin(PluginFastTimeWeighting(input=la))
 laf.create_meter(LeqAccumulator, name="LAeq")
 laf.create_meter(MaxAccumulator, name="LAFmax")
 
-engine.reporter.add_column("LAeq", laf, "LAeq")
-engine.reporter.add_column("LAFmax", laf, "LAFmax")
+reporter = Reporter()
+reporter.add_column("LAeq", laf, "LAeq")
+reporter.add_column("LAFmax", laf, "LAFmax")
+engine.on_record = reporter.record
 
 engine.run()
-engine.reporter.write("output/measurement")
+reporter.write("output/measurement")
 ```
 
 ---

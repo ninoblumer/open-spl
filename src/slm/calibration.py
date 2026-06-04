@@ -49,14 +49,19 @@ def calibrate_sensitivity(
     from slm.meter import LeqAccumulator, LeqMovingMeter
 
     use_stability = stability_window is not None
-    dt = 0.5 if use_stability else 1e9   # dt=1e9 → reporter never fires (file path)
+    dt = 0.5 if use_stability else 1e9   # dt=1e9 → no snapshot fires (file path)
 
     if use_stability:
-        from slm.io.reporter import Reporter
-
         _history: deque[float] = deque(maxlen=stability_window)
+        _last_sample = None   # timestamp of the last sample (the engine ticks every block)
 
-        def _on_report(timestamp, bb, bands):
+        def _on_record(timestamp, _dt):
+            # The engine fires on_record every block; gate to the dt cadence so a
+            # stability "reading" is one moving-Leq sample per dt seconds.
+            nonlocal _last_sample
+            if _last_sample is not None and (timestamp - _last_sample).total_seconds() < dt:
+                return
+            _last_sample = timestamp
             val_sq = bp.read_lin("leq_moving")[0]
             if val_sq > 0:
                 _history.append(10.0 * np.log10(val_sq / REFERENCE_PRESSURE ** 2))
@@ -64,7 +69,7 @@ def calibrate_sensitivity(
                     and float(np.std(_history)) < stability_threshold):
                 controller.stop()
 
-        engine = Engine(controller, dt=dt, reporter=Reporter(display_fn=_on_report))
+        engine = Engine(controller, dt=dt, on_record=_on_record)
     else:
         engine = Engine(controller, dt=dt)
     bus = engine.add_bus("cal", PluginZWeighting)

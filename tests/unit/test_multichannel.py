@@ -33,12 +33,11 @@ def _write_mono(path, freq=1000.0, duration=1.0, amplitude=0.5):
 def _run(wav_path, metric_names):
     from slm.io.file_controller import FileController
     from slm.engine import Engine
-    from slm.io.reporter import Reporter
     from slm.assembly import parse_metric, build_chain
 
     controller = FileController(str(wav_path), blocksize=BLOCKSIZE)
     controller.set_sensitivity(1.0, unit="V")
-    engine = Engine(controller, dt=1.0, reporter=Reporter())
+    engine = Engine(controller, dt=1.0)
     build_chain([parse_metric(m) for m in metric_names], engine)
     engine.run()
     return engine

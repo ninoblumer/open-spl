@@ -10,8 +10,7 @@ import argparse
 import cProfile
 import io
 import pstats
-from slm.engine import Engine
-from slm.assembly import parse_metric, build_chain
+from slm.assembly import parse_metric, assemble_engine
 from slm.io.reporter import Reporter
 from slm.io.noise_controller import NoiseController
 
@@ -50,11 +49,11 @@ def run(seconds: float, samplerate: int, blocksize: int):
         n_blocks=n_blocks, realtime=False, seed=42,
     )
     controller.set_sensitivity(1.0, unit="V")
-    reporter = Reporter(precision=2)
-    engine = Engine(controller, dt=0.1, reporter=reporter)
-
     specs = [parse_metric(m) for m in METRIC_NAMES]
-    build_chain(specs, engine)
+    engine, bindings = assemble_engine(specs, controller, dt=0.1)
+    reporter = Reporter(precision=2)
+    reporter.add_columns(bindings)
+    engine.on_record = reporter.record
 
     pr = cProfile.Profile()
     pr.enable()

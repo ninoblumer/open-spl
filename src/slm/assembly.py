@@ -274,6 +274,29 @@ class ChainPlan:
     """The meter created on the terminal node."""
 
 
+@dataclass(frozen=True)
+class ColumnBinding:
+    """A report column to register: which meter to read and how to label it.
+
+    Produced by :func:`build_chain` / :func:`assemble_engine` and consumed by
+    ``Reporter.add_columns``.  This decouples chain assembly from the reporter:
+    the assembler says *what* can be read; the caller decides *which* sink reads
+    it (and when, via ``engine.on_record``).
+    """
+
+    label: str
+    """Column label (the metric name)."""
+
+    plugin: "PluginMeter"
+    """Terminal plugin holding the meter."""
+
+    meter_name: str
+    """Name of the meter on *plugin* to read."""
+
+    center_frequencies: list[float] | None = None
+    """Band centre frequencies for per-band columns, else ``None``."""
+
+
 def plan_chain(spec: MetricSpec) -> ChainPlan:
     """Lower a :class:`MetricSpec` into a structural :class:`ChainPlan`.
 
@@ -364,8 +387,9 @@ def meter_class_name(meter: MeterReq) -> str:
 def build_chain(
     specs: list[MetricSpec],
     engine: Engine,
-) -> None:
-    """Wire buses, plugins, and meters for *specs*; register each with *engine.reporter*.
+) -> list[ColumnBinding]:
+    """Wire buses, plugins, and meters for *specs* into *engine*; return the
+    report-column bindings (the caller registers them with a sink).
 
     Shared upstream nodes (buses, time-weighting plugins, octave-band plugins)
     are created lazily and reused across specs with identical parameters.
@@ -383,7 +407,11 @@ def build_chain(
     Args:
         specs:  List of parsed metric descriptors, typically from :func:`parse_metric`.
         engine: The :class:`~slm.engine.Engine` instance to attach buses to.
-                Meters are registered with ``engine.reporter``.
+
+    Returns:
+        One :class:`ColumnBinding` per spec, describing the report column it
+        exposes.  Pass these to ``Reporter.add_columns`` (this function does not
+        touch any reporter itself).
     """
     from slm.frequency_weighting import (
         PluginAWeighting, PluginCWeighting, PluginZWeighting,
@@ -420,6 +448,7 @@ def build_chain(
 
     buses: dict[str, Bus] = {}
     plugins: dict[tuple, PluginMeter] = {}   # NodeReq.key → plugin (shared across specs)
+    bindings: list[ColumnBinding] = []
 
     def get_bus(w: str) -> Bus:
         """Return the frequency-weighted bus for letter *w*, creating it if needed."""
@@ -475,11 +504,37 @@ def build_chain(
             meter_kwargs = {"t": meter.window_seconds}
         terminal.create_meter(meter_cls, name=meter.name, **meter_kwargs)
 
-        # Register with reporter; band metrics pass centre frequencies for labels.
+        # Record the report column this metric exposes (the caller registers it
+        # with a sink); band metrics carry centre frequencies for labels.
         if meter.is_band:
             band_node = next(n for n in plan.nodes if n.kind == "band")
             center_freqs = plugins[band_node.key].center_frequencies
         else:
             center_freqs = None
-        engine.reporter.add_column(meter.name, terminal, meter.name,
-                                   center_frequencies=center_freqs)
+        bindings.append(ColumnBinding(meter.name, terminal, meter.name,
+                                      center_frequencies=center_freqs))
+
+    return bindings
+
+
+def assemble_engine(
+    specs: list[MetricSpec],
+    controller,
+    dt: float = 0.1,
+) -> tuple[Engine, list[ColumnBinding]]:
+    """Create an :class:`~slm.engine.Engine` for *controller* and wire *specs*.
+
+    The factory counterpart of :func:`build_chain`: it constructs the engine
+    (so a half-built engine is never exposed), wires the chain, and returns the
+    engine together with its report-column bindings.  The caller attaches a
+    sink::
+
+        engine, bindings = assemble_engine(specs, controller, dt)
+        reporter.add_columns(bindings)
+        engine.on_record = reporter.record
+        engine.run()
+    """
+    from slm.engine import Engine
+    engine = Engine(controller, dt=dt)
+    bindings = build_chain(specs, engine)
+    return engine, bindings

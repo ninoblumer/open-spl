@@ -664,7 +664,7 @@ class TestRunNoiseMeasurement:
             for _ in range(10):
                 self._process_block()
             if self._last_timestamp is not None:
-                self.reporter.record(self._last_timestamp, 0)
+                self.on_record(self._last_timestamp, 0)
 
         with patch.object(Engine, "run", _short_run):
             run_noise_measurement(0.05, config, print_to_console=False)

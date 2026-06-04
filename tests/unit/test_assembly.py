@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from slm.assembly import MetricSpec, parse_metric, build_chain
+from slm.assembly import MetricSpec, parse_metric, build_chain, assemble_engine
 from slm.engine import Engine
 from slm.io.file_controller import FileController
 from slm.meter import (
@@ -40,11 +40,12 @@ def _run_chain(tmp_path: Path, metric_names: list[str],
 
     controller = FileController(str(wav), blocksize=blocksize)
     controller.set_sensitivity(sensitivity_v, unit="V")
-    reporter = Reporter()
-    engine = Engine(controller, dt=dt, reporter=reporter)
 
     specs = [parse_metric(n) for n in metric_names]
-    build_chain(specs, engine)
+    engine, bindings = assemble_engine(specs, controller, dt=dt)
+    reporter = Reporter()
+    reporter.add_columns(bindings)
+    engine.on_record = reporter.record
     engine.run()
     return engine, reporter
 
@@ -512,7 +513,7 @@ def _build_only(tmp_path: Path, names: list[str]):
     _write_sine(wav)
     controller = FileController(str(wav), blocksize=1024)
     controller.set_sensitivity(1.0, unit="V")
-    engine = Engine(controller, dt=10.0, reporter=Reporter())
+    engine = Engine(controller, dt=10.0)
     build_chain([parse_metric(n) for n in names], engine)
     return engine
 
@@ -581,3 +582,57 @@ class TestPlanChain:
         assert labels[1].startswith("PluginOctaveBand") and "bpo=1/3" in labels[1]
         assert labels[2] == "PluginFastTimeWeighting"
         assert meter_class_name(plan.meter) == "MaxAccumulator"
+
+
+# ---------------------------------------------------------------------------
+# assemble_engine factory + on_record boundary
+# ---------------------------------------------------------------------------
+
+def _file_controller(tmp_path: Path, duration: float = 1.0):
+    wav = tmp_path / "sine.wav"
+    _write_sine(wav, duration=duration)
+    controller = FileController(str(wav), blocksize=1024)
+    controller.set_sensitivity(1.0, unit="V")
+    return controller
+
+
+class TestAssembleEngine:
+
+    def test_returns_engine_and_bindings(self, tmp_path):
+        from slm.assembly import ColumnBinding
+        controller = _file_controller(tmp_path)
+        specs = [parse_metric("LAeq"), parse_metric("LZeq:bands:63-8000")]
+        engine, bindings = assemble_engine(specs, controller, dt=10.0)
+        assert isinstance(engine, Engine)
+        assert all(isinstance(b, ColumnBinding) for b in bindings)
+        assert [b.label for b in bindings] == ["LAeq", "LZeq:bands:63-8000"]
+        # broadband binding carries no centre freqs; the band one does
+        assert bindings[0].center_frequencies is None
+        assert bindings[1].center_frequencies is not None
+
+    def test_on_record_default_is_noop(self, tmp_path):
+        """An engine with no sink attached runs and still updates its meters."""
+        controller = _file_controller(tmp_path)
+        engine, _ = assemble_engine([parse_metric("LAeq")], controller, dt=10.0)
+        engine.run()   # no on_record wired → must not raise
+        val = engine._busses["A"].frequency_weighting.read_db("LAeq")
+        assert np.isfinite(val)
+
+    def test_reporter_wiring_populates_rows(self, tmp_path):
+        controller = _file_controller(tmp_path)
+        engine, bindings = assemble_engine([parse_metric("LAeq")], controller, dt=0.1)
+        reporter = Reporter()
+        reporter.add_columns(bindings)
+        engine.on_record = reporter.record
+        engine.run()
+        assert len(reporter._broadband_rows) >= 1
+        assert np.isfinite(reporter._broadband_rows[-1]["LAeq"])
+
+    def test_on_record_ticks_each_block_then_final_snapshot(self, tmp_path):
+        controller = _file_controller(tmp_path, duration=0.5)
+        engine, _ = assemble_engine([parse_metric("LAeq")], controller, dt=10.0)
+        seen_dts: list[float] = []
+        engine.on_record = lambda ts, dt: seen_dts.append(dt)
+        engine.run()
+        assert len(seen_dts) > 1     # one tick per processed block
+        assert seen_dts[-1] == 0     # final forced snapshot passes dt=0
