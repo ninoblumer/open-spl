@@ -60,6 +60,26 @@ class TestFileControllerBasics:
         ctrl = FileController(str(wav), blocksize=1024)
         assert ctrl.overruns == 0
 
+    def test_uniform_interface_defaults(self, tmp_path):
+        """A pull-based source uses the inert uniform-interface defaults."""
+        wav = tmp_path / "sine.wav"
+        _write_sine(wav)
+        from slm.io.file_controller import FileController
+        ctrl = FileController(str(wav), blocksize=1024)
+        assert ctrl.load_status() is None    # no live telemetry
+        ctrl.start()                         # no-op — must not raise
+
+    def test_context_manager_starts_and_stops(self, tmp_path):
+        """``with controller:`` starts on enter and stops (closes file) on exit."""
+        wav = tmp_path / "sine.wav"
+        _write_sine(wav)
+        from slm.io.file_controller import FileController
+        ctrl = FileController(str(wav), blocksize=1024)
+        with ctrl as c:
+            assert c is ctrl
+            assert not ctrl.done
+        assert ctrl.done                     # __exit__ called stop()
+
 
 # ---------------------------------------------------------------------------
 # Controller.set_sensitivity unit paths

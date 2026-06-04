@@ -50,3 +50,33 @@ class Controller(ABC):
         else:
             raise ValueError(f"Unknown sensitivity unit: {unit!r}. Expected 'mV', 'V', or 'dB'.")
 
+    # ------------------------------------------------------------------
+    # Lifecycle / telemetry — uniform across sources so the caller never has to
+    # special-case the source type.  Real-time controllers override these; the
+    # defaults suit pull-based sources (e.g. files): start is a no-op, no blocks
+    # are dropped, and there is no live load telemetry.
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Begin producing audio.  No-op for pull-based sources (e.g. files);
+        real-time sources override this to launch their producer."""
+
+    @property
+    def overruns(self) -> int:
+        """Blocks dropped because the engine fell behind.  Sources that cannot
+        drop blocks report 0."""
+        return 0
+
+    def load_status(self) -> str | None:
+        """One-line load/queue telemetry for the live display, or ``None`` when
+        the source has none (e.g. file playback)."""
+        return None
+
+    def __enter__(self) -> "Controller":
+        self.start()
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.stop()
+        return False
+

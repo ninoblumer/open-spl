@@ -152,3 +152,12 @@ class RealtimeController(Controller):
         than real-time and blocks are accumulating in the queue.
         """
         return max(self._qdepth_buf, default=0)
+
+    def load_status(self) -> str:
+        """Compact live telemetry: ``Load=NN%  Q=depth/max  [missed blocks=N]``."""
+        rho = self.rho_mean
+        load_str = f"{rho * 100:.0f}%" if rho is not None else "---%"
+        parts = [f"Load={load_str}", f"Q={self.queue_depth_max}/{self._queue.maxsize}"]
+        if self.overruns > 0:
+            parts.append(f"missed blocks={self.overruns}")
+        return "  ".join(parts)

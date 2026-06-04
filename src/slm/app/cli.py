@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
 from slm.io.controller import Controller
-from slm.io.realtime_controller import RealtimeController
 from slm.io.thread_priority import high_priority
 
 if TYPE_CHECKING:
@@ -144,16 +143,18 @@ def _run_engine(
     print_to_console: bool = False,
     display_mode: str = "plain",
 ) -> None:
-    """Build and run the engine for *controller*; write results on exit."""
+    """Build and run the engine for *controller*; write results on exit.
+
+    Branch-free across source types: the controller's uniform interface handles
+    start/stop (context manager), dropped-block counting (``overruns``), and live
+    telemetry (``load_status``); file sources use the inert defaults.
+    """
     from slm.assembly import parse_metric, assemble_engine
     from slm.io.reporter import Reporter
     from slm.io.display import make_display_fn
-    from slm.io.realtime_controller import RealtimeController
-
-    rt = controller if isinstance(controller, RealtimeController) else None
 
     specs = [parse_metric(m) for m in config.metrics]
-    display_fn = make_display_fn(display_mode, precision=2, controller=rt) if print_to_console else None
+    display_fn = make_display_fn(display_mode, precision=2, controller=controller) if print_to_console else None
     reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
     engine, bindings = assemble_engine(specs, controller, dt=config.dt)
     reporter.add_columns(bindings)
@@ -161,18 +162,17 @@ def _run_engine(
 
     gc.collect()
     gc.disable()
-    with high_priority():
-        try:
-            engine.run()
-        except KeyboardInterrupt:
-            print("\nMeasurement interrupted.")
-            if rt is not None:
-                rt.stop()
-        finally:
-            gc.enable()
-            if rt is not None and rt.overruns:
-                print(f"Warning: {rt.overruns} block(s) dropped (engine too slow).")
-            reporter.write(config.output)
+    try:
+        with high_priority(), controller:   # controller.__enter__/__exit__ → start/stop
+            try:
+                engine.run()
+            except KeyboardInterrupt:
+                print("\nMeasurement interrupted.")
+    finally:
+        gc.enable()
+        if controller.overruns:
+            print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
+        reporter.write(config.output)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +224,6 @@ def run_noise_measurement(
         realtime=True, queue_maxsize=config.queue_maxsize, dt=config.dt,
     )
     controller.set_sensitivity(sensitivity_v, unit="V")
-    controller.start()
     print(
         f"  Source: white-noise generator  |  "
         f"Sample rate: {samplerate} Hz  |  "
@@ -257,7 +256,6 @@ def run_realtime_measurement(
         queue_maxsize=config.queue_maxsize, dt=config.dt,
     )
     controller.set_sensitivity(sensitivity_v, unit="V")
-    controller.start()
     print(
         f"  Sample rate: {samplerate} Hz  |  "
         f"Block size: {blocksize}  |  "

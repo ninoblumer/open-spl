@@ -186,3 +186,10 @@ class TestEngineIntegration:
 
         assert ctrl.rho_mean is not None
         assert ctrl.rho_mean >= 0.0
+
+    def test_load_status_is_string(self):
+        """A real-time controller reports a telemetry string (vs None for files)."""
+        ctrl = _make_controller(samplerate=48_000, blocksize=1_024, queue_maxsize=16)
+        status = ctrl.load_status()
+        assert isinstance(status, str)
+        assert "Load=" in status and "Q=" in status

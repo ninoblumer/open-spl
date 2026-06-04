@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING, Callable
 from slm.io.reporter import _fmt_timestamp
 
 if TYPE_CHECKING:
-    from slm.io.realtime_controller import RealtimeController
+    from slm.io.controller import Controller
 
 
 def make_display_fn(mode: str, db_min: float = 40.0, db_max: float = 120.0,
                     precision: int = 1,
-                    controller: "RealtimeController | None" = None) -> Callable:
+                    controller: "Controller | None" = None) -> Callable:
     """Return a display callback for Reporter.
 
     The callback signature is ``fn(timestamp, broadband_row, band_row)`` where:
@@ -30,25 +30,18 @@ def make_display_fn(mode: str, db_min: float = 40.0, db_max: float = 120.0,
     return _PlainDisplay(precision, controller=controller)
 
 
-def _fmt_status(controller: "RealtimeController | None") -> str:
-    """Format a compact status string from a controller's rolling load metrics."""
+def _fmt_status(controller: "Controller | None") -> str:
+    """Return the controller's live load/telemetry line, or '' if it has none."""
     if controller is None:
         return ""
-    rho = controller.rho_mean
-    qdepth = controller.queue_depth_max
-    qmax = controller._queue.maxsize
-    load_str = f"{rho * 100:.0f}%" if rho is not None else "---%"
-    parts = [f"Load={load_str}", f"Q={qdepth}/{qmax}"]
-    if controller.overruns > 0:
-        parts.append(f"missed blocks={controller.overruns}")
-    return "  ".join(parts)
+    return controller.load_status() or ""
 
 
 class _PlainDisplay:
     """Scrolling plain-text display."""
 
     def __init__(self, precision: int = 1,
-                 controller: "RealtimeController | None" = None) -> None:
+                 controller: "Controller | None" = None) -> None:
         self._fmt = f"{{:.{precision}f}}"
         self._controller = controller
 
@@ -86,7 +79,7 @@ class _BarDisplay:
     def __init__(self, db_min: float = 40.0, db_max: float = 120.0,
                  precision: int = 1, threshold_lo: float = 85.0,
                  threshold_hi: float = 95.0,
-                 controller: "RealtimeController | None" = None) -> None:
+                 controller: "Controller | None" = None) -> None:
         self._db_min = db_min
         self._db_max = db_max
         self._precision = precision
