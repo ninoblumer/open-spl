@@ -399,151 +399,87 @@ def build_chain(
         LEAccumulator, LEMovingMeter,
     )
 
-    # Maps weighting letter → frequency-weighting plugin class
+    # Codegen maps: structural node / meter kinds → concrete classes (the
+    # instantiation counterpart of the string label maps the renderers use).
     _w_cls: dict[str, type[PluginMeter]] = {
-        "A": PluginAWeighting,
-        "C": PluginCWeighting,
-        "Z": PluginZWeighting,
+        "A": PluginAWeighting, "C": PluginCWeighting, "Z": PluginZWeighting,
     }
-    # Maps time-weighting letter → time-weighting plugin class
     _tw_cls: dict[str, type[PluginMeter]] = {
-        "F": PluginFastTimeWeighting,
-        "S": PluginSlowTimeWeighting,
+        "F": PluginFastTimeWeighting, "S": PluginSlowTimeWeighting,
         "I": PluginImpulseTimeWeighting,
     }
-    # Maps measure string → accumulating meter class (no moving window)
     _acc_cls: dict[str, type[PluginMeter]] = {
-        "eq": LeqAccumulator,
-        "max": MaxAccumulator,
-        "min": MinAccumulator,
-        "last": LastAccumulatingMeter,
-        "E": LEAccumulator,
+        "eq": LeqAccumulator, "max": MaxAccumulator, "min": MinAccumulator,
+        "last": LastAccumulatingMeter, "E": LEAccumulator,
     }
-    # Maps measure string → moving-window meter class
-    # Note: "last" is intentionally absent — bare metrics always use an accumulating meter.
+    # "last" is intentionally absent — bare metrics always use an accumulating meter.
     _mov_cls: dict[str, type[PluginMeter]] = {
-        "eq": LeqMovingMeter,
-        "max": MaxMovingMeter,
-        "min": MinMovingMeter,
+        "eq": LeqMovingMeter, "max": MaxMovingMeter, "min": MinMovingMeter,
         "E": LEMovingMeter,
     }
 
-    # Lazy-creation caches keyed by the parameters that uniquely identify each node.
     buses: dict[str, Bus] = {}
-    tw_plugins: dict[tuple[str, str], PluginMeter] = {}
-    sq_plugins: dict[str, PluginMeter] = {}
-    band_plugins: dict[tuple[str, tuple[float, float], float], PluginMeter] = {}
-    band_tw_plugins: dict[tuple[str, tuple[float, float], float, str], PluginMeter] = {}
-    band_sq_plugins: dict[tuple[str, tuple[float, float], float], PluginMeter] = {}
+    plugins: dict[tuple, PluginMeter] = {}   # NodeReq.key → plugin (shared across specs)
 
     def get_bus(w: str) -> Bus:
-        """Return the frequency-weighted bus for weighting letter *w*, creating it if needed."""
+        """Return the frequency-weighted bus for letter *w*, creating it if needed."""
         if w not in buses:
             buses[w] = engine.add_bus(w, _w_cls[w])
         return buses[w]
 
-    def get_tw_plugin(w: str, tw_letter: str) -> PluginMeter:
-        """Return the broadband time-weighting plugin for (*w*, *tw_letter*), creating if needed."""
-        key = (w, tw_letter)
-        if key not in tw_plugins:
-            bus = get_bus(w)
-            freq_w = bus.frequency_weighting
-            plugin = _tw_cls[tw_letter](input=freq_w, zero_zi=True)
-            bus.add_plugin(plugin)
-            tw_plugins[key] = plugin
-        return tw_plugins[key]
+    def build_node(node: NodeReq, pred: "PluginMeter | None") -> PluginMeter:
+        """Instantiate (or reuse, by :attr:`NodeReq.key`) the plugin for *node*.
 
-    def get_band_plugin(w: str, bands: tuple[float, float], bpo: float) -> PluginMeter:
-        """Return the octave-band filter bank for (*w*, *bands*, *bpo*), creating if needed."""
-        key = (w, bands, bpo)
-        if key not in band_plugins:
-            bus = get_bus(w)
-            freq_w = bus.frequency_weighting
+        *pred* is the upstream plugin (the previous node's output); it is unused
+        for the ``freq_weighting`` node, which is the bus's own weighting plugin.
+        """
+        if node.key in plugins:
+            return plugins[node.key]
+        bus = get_bus(node.weighting)
+        if node.kind == "freq_weighting":
+            plugin = bus.frequency_weighting
+        elif node.kind == "band":
             plugin = PluginOctaveBand(
-                input=freq_w, limits=bands, bands_per_oct=bpo, zero_zi=True,
+                input=pred, limits=node.bands, bands_per_oct=node.bands_per_oct,
+                zero_zi=True,
             )
             bus.add_plugin(plugin)
-            band_plugins[key] = plugin
-        return band_plugins[key]
-
-    def get_sq_plugin(w: str) -> PluginMeter:
-        """Return the broadband squaring plugin for *w*, creating if needed.
-
-        Used for bare metrics (no time-weighting) so the meter receives Pa² input.
-        """
-        if w not in sq_plugins:
-            bus = get_bus(w)
-            plugin = PluginSquare(input=bus.frequency_weighting)
+        elif node.kind == "time_weighting":
+            plugin = _tw_cls[node.time_weighting](
+                input=pred, zero_zi=True, width=pred.width,
+            )
             bus.add_plugin(plugin)
-            sq_plugins[w] = plugin
-        return sq_plugins[w]
-
-    def get_band_sq_plugin(w: str, bands: tuple[float, float], bpo: float) -> PluginMeter:
-        """Return the per-band squaring plugin for (*w*, *bands*, *bpo*), creating if needed.
-
-        Used for bare per-band metrics so each band output is in Pa².
-        """
-        key = (w, bands, bpo)
-        if key not in band_sq_plugins:
-            band_plugin = get_band_plugin(w, bands, bpo)
-            plugin = PluginSquare(input=band_plugin, width=band_plugin.width)
-            get_bus(w).add_plugin(plugin)
-            band_sq_plugins[key] = plugin
-        return band_sq_plugins[key]
-
-    def get_band_tw_plugin(
-        w: str, bands: tuple[float, float], bpo: float, tw_letter: str
-    ) -> PluginMeter:
-        """Return the per-band time-weighting plugin for (*w*, *bands*, *bpo*, *tw_letter*).
-
-        The plugin is inserted after the octave-band filter bank so each band
-        is time-weighted independently.
-        """
-        key = (w, bands, bpo, tw_letter)
-        if key not in band_tw_plugins:
-            band_plugin = get_band_plugin(w, bands, bpo)
-            plugin = _tw_cls[tw_letter](input=band_plugin, zero_zi=True, width=band_plugin.width)
-            get_bus(w).add_plugin(plugin)
-            band_tw_plugins[key] = plugin
-        return band_tw_plugins[key]
+        elif node.kind == "square":
+            plugin = PluginSquare(input=pred, width=pred.width)
+            bus.add_plugin(plugin)
+        else:  # pragma: no cover
+            raise ValueError(f"Unknown node kind: {node.kind!r}")
+        plugins[node.key] = plugin
+        return plugin
 
     for spec in specs:
-        # Resolve the upstream plugin this metric reads from
-        if spec.bands is not None:
-            if spec.time_weighting is not None:
-                plugin = get_band_tw_plugin(
-                    spec.weighting, spec.bands, spec.bands_per_oct, spec.time_weighting
-                )
-            elif spec.measure == "last":
-                # no TW, bare metric per band: square first so output is Pa²
-                plugin = get_band_sq_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
-            else:
-                plugin = get_band_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
-        elif spec.time_weighting is not None:
-            plugin = get_tw_plugin(spec.weighting, spec.time_weighting)
-        elif spec.measure == "last":
-            # no TW, broadband bare metric: square first so output is Pa²
-            plugin = get_sq_plugin(spec.weighting)
-        else:
-            bus = get_bus(spec.weighting)
-            plugin = bus.frequency_weighting
+        plan = plan_chain(spec)
 
-        # Select meter class and build kwargs
-        is_moving = spec.window_is_dt or spec.window_seconds is not None
-        if not is_moving:
-            meter_cls = _acc_cls[spec.measure]
-            meter_kwargs: dict[str, float] = {}
-        else:
-            meter_cls = _mov_cls[spec.measure]
-            # window_is_dt=True → no 't' kwarg → MovingMeter defaults to bus.dt
-            meter_kwargs = {} if spec.window_is_dt else {"t": spec.window_seconds}
+        # Walk the node path, deduping by key; the last plugin is the terminal.
+        pred: PluginMeter | None = None
+        for node in plan.nodes:
+            pred = build_node(node, pred)
+        terminal = pred
+        assert terminal is not None   # every plan has at least the freq_weighting node
 
-        plugin.create_meter(meter_cls, name=spec.name, **meter_kwargs)
+        meter = plan.meter
+        meter_cls = (_mov_cls if meter.moving else _acc_cls)[meter.measure]
+        meter_kwargs: dict[str, float] = {}
+        if meter.moving and not meter.window_is_dt:
+            # window_is_dt → no 't' kwarg → MovingMeter defaults to bus.dt
+            meter_kwargs = {"t": meter.window_seconds}
+        terminal.create_meter(meter_cls, name=meter.name, **meter_kwargs)
 
-        # Register with reporter; band metrics also pass centre frequencies for column labels
-        if spec.bands is not None:
-            band_plugin = get_band_plugin(spec.weighting, spec.bands, spec.bands_per_oct)
-            center_freqs = band_plugin.center_frequencies
+        # Register with reporter; band metrics pass centre frequencies for labels.
+        if meter.is_band:
+            band_node = next(n for n in plan.nodes if n.kind == "band")
+            center_freqs = plugins[band_node.key].center_frequencies
         else:
             center_freqs = None
-        engine.reporter.add_column(spec.name, plugin, spec.name, center_frequencies=center_freqs)
+        engine.reporter.add_column(meter.name, terminal, meter.name,
+                                   center_frequencies=center_freqs)
