@@ -56,9 +56,10 @@ def run(seconds: float, samplerate: int, blocksize: int):
     engine.on_record = reporter.record
 
     pr = cProfile.Profile()
-    pr.enable()
-    engine.run()
-    pr.disable()
+    with controller:               # start the noise-producer thread; stop on exit
+        pr.enable()
+        engine.run()
+        pr.disable()
 
     s = io.StringIO()
     ps = pstats.Stats(pr, stream=s).sort_stats(pstats.SortKey.CUMULATIVE)

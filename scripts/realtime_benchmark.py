@@ -91,7 +91,9 @@ def _make_engine(loadout_name: str, blocksize: int, samplerate: int,
     engine, bindings = assemble_engine(specs, controller, dt=dt)
     reporter = Reporter()
     reporter.add_columns(bindings)
-    engine.on_record = reporter.record
+    # _run_loop drives the engine block-by-block and calls reporter.record itself
+    # (to time the processing region precisely), so on_record is intentionally
+    # left unwired here.
     return engine, controller, reporter
 
 
