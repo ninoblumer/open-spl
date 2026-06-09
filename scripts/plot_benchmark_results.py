@@ -220,7 +220,7 @@ def _plot_k2_combined(
             color = sr_color[sr]
             ax_rho.hist(
                 np.clip(rho * 100, 0, 300), bins=np.arange(0, 301, 5),
-                weights=np.ones(len(rho)) / len(rho) * 100,
+                weights=np.ones(len(rho)) / len(rho),
                 color=color, alpha=0.5, edgecolor="none",
             )
             med = float(np.median(rho)) * 100
@@ -234,10 +234,12 @@ def _plot_k2_combined(
         ax_rho.axvline(100, color="black", linewidth=1.0, linestyle=":")
         ax_rho.set_xlabel(r"$\rho$ (%)", fontsize=8)
         ax_rho.set_xlim(0, 300)
-        ax_rho.set_ylim(0, 100)
-        ax_rho.set_ylabel("Blocks (%)", fontsize=8)
+        ax_rho.set_yscale('log')
+        ax_rho.set_ylim(1e-5, 1e0)
+        ax_rho.set_ylabel("Relative frequency", fontsize=8)
         ax_rho.tick_params(labelsize=7)
-        ax_rho.grid(True, axis="y", linestyle=":", alpha=0.4)
+        ax_rho.grid(True, axis="y", which="major", linestyle=":", alpha=0.4)
+        ax_rho.grid(True, axis="y", which="minor", linestyle=":", alpha=0.2)
         if ci == 3:
             deadline_handle = mlines.Line2D(
                 [], [], color="black", linewidth=1.0, linestyle=":",
@@ -263,7 +265,7 @@ def _plot_k2_combined(
             max_depth = int(data.max())
             bins = np.arange(0, max_depth + 2) - 0.5
             ax_q.hist(data, bins=bins, color=color, alpha=0.5, edgecolor="none",
-                      weights=np.ones(len(data)) / len(data) * 100, label=sr_label[sr])
+                      weights=np.ones(len(data)) / len(data), label=sr_label[sr])
             pending_arrows.append((max_depth, sr, color))
 
             row_b = b_lookup.get((sr, bs))
@@ -280,11 +282,13 @@ def _plot_k2_combined(
             continue
 
         ax_q.set_xlabel("Queue depth", fontsize=8)
-        ax_q.set_xlim(0, xlim_q)
-        ax_q.set_ylim(0, 100)
-        ax_q.set_ylabel("Blocks (%)", fontsize=8)
+        ax_q.set_xlim(-0.5, xlim_q)
+        ax_q.set_yscale('log')
+        ax_q.set_ylim(1e-5, 1e0)
+        ax_q.set_ylabel("Relative frequency", fontsize=8)
         ax_q.tick_params(labelsize=7)
-        ax_q.grid(True, axis="y", linestyle=":", alpha=0.4)
+        ax_q.grid(True, axis="y", which="major", linestyle=":", alpha=0.4)
+        ax_q.grid(True, axis="y", which="minor", linestyle=":", alpha=0.2)
 
         # Draw short arrows anchored just above the bar at max_depth
         y_top = ax_q.get_ylim()[1]

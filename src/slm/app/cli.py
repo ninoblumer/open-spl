@@ -137,7 +137,7 @@ def calibrate_from_device(
 # Shared engine runner
 # ---------------------------------------------------------------------------
 
-def _run_engine(
+def _build_and_run_engine(
     controller: Controller,
     config: "SLMConfig",
     print_to_console: bool = False,
@@ -159,6 +159,8 @@ def _run_engine(
     engine, bindings = assemble_engine(specs, controller, dt=config.dt)
     reporter.add_columns(bindings)
     engine.on_record = reporter.record
+
+    # start execution
 
     gc.collect()
     gc.disable()
@@ -195,7 +197,7 @@ def run_measurement(
 
     controller = FileController(str(wav_path), blocksize=blocksize, realtime=realtime)
     controller.set_sensitivity(sensitivity_v, unit="V")
-    _run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
+    _build_and_run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +232,7 @@ def run_noise_measurement(
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-    _run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
+    _build_and_run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
 
 
 def run_realtime_measurement(
@@ -261,7 +263,7 @@ def run_realtime_measurement(
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-    _run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
+    _build_and_run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
 
 
 # ---------------------------------------------------------------------------

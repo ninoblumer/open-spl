@@ -69,14 +69,6 @@ BS_COLOR = {
     1024: "#4393c3",
     4096: "#2166ac",
 }
-# Block-size linestyles — redundant with colour for B&W printing.
-BS_STYLE = {
-    128:  "-",
-    256:  "--",
-    512:  ":",
-    1024: "-.",
-    4096: (0, (5, 1)),
-}
 BS_LABEL = {bs: f"bs = {bs}" for bs in BS_COLOR}
 
 
@@ -313,9 +305,9 @@ def make_fig_p3(summary_b: dict, queue_arrays: dict) -> plt.Figure:
     """Queue depth over time (left) and mean overrun rate per cell (right).
 
     Left subplot: per-block queue depth time series for each Quantity B cell,
-    colour encodes loadout, linestyle encodes block size.  Queue depth is the
-    number of blocks waiting in the producer queue when the consumer reads;
-    a depth of 0 indicates the consumer caught up between blocks.
+    each cell drawn in its own colour.  Queue depth is the number of blocks
+    waiting in the producer queue when the consumer reads; a depth of 0
+    indicates the consumer caught up between blocks.
 
     Right subplot: grouped bar chart of mean queue depth per cell.
     """
@@ -330,18 +322,19 @@ def make_fig_p3(summary_b: dict, queue_arrays: dict) -> plt.Figure:
                                       gridspec_kw={"wspace": 0.35})
 
     # ── left: time series ────────────────────────────────────────────────────
-    for lo, bs in cells:
+    # One distinct colour per cell so lines are told apart by colour, not dashes.
+    cell_colors = plt.get_cmap("tab10")(np.linspace(0, 1, 10))
+    for idx, (lo, bs) in enumerate(cells):
         qd  = queue_arrays[(lo, bs)]
         sr  = int(summary_b[(lo, bs)]["samplerate"])
         t   = np.arange(len(qd)) * bs / sr
         win = max(1, round(sr / bs))         # ~1 s rolling median
         med = _rolling_median(qd.astype(float), win)
 
-        color = LOADOUT_COLOR[lo]
+        color = cell_colors[idx % len(cell_colors)]
         label = f"{lo}  bs={bs}"
         ax_t.plot(t, qd,  color=color, lw=0.5, alpha=0.15, rasterized=True)
-        ax_t.plot(t, med, color=color, lw=1.4, alpha=0.9,
-                  linestyle=BS_STYLE.get(bs, "-"), label=label)
+        ax_t.plot(t, med, color=color, lw=1.4, alpha=0.9, label=label)
 
     ax_t.set_xlabel("Time (s)", fontsize=9)
     ax_t.set_ylabel("Queue depth (blocks)", fontsize=9)
