@@ -98,6 +98,9 @@ class PluginSquare(PluginTimeWeighting):
         np.square(block, out=self.output)
 
 
+#  Excluded from test coverage: Numba compiles this to machine code, so coverage.py cannot trace its body.
+#  It is verified functionally against the IEC 61672-1 F/S time-weighting and tone-burst response tests
+#  (tests/iec61672/test_61672_time_weightings.py, tests/iec61672/test_61672_toneburst.py).
 @jit(nopython=True, cache=True)  # pragma: no cover
 def _symmetric_time_weighting(x, zi, alpha, out):
     """
@@ -123,6 +126,9 @@ def _symmetric_time_weighting(x, zi, alpha, out):
         zi[ch] = state
 
 
+#  Excluded from test coverage: Numba compiles this to machine code, so coverage.py cannot trace its body.
+#  It is verified functionally against the IEC 61672-1 Impulse time-weighting tests
+#  (tests/unit/test_impulse_time_weighting.py).
 @jit(nopython=True, cache=True)  # pragma: no cover
 def _asymmetric_time_weighting(x, zi, alpha_rise, alpha_fall, out):
     """Process one block with IEC 61672-1 Impulse time weighting.

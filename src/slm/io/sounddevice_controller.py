@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 try:
     import sounddevice as sd
-except ImportError as _exc:
+except ImportError as _exc: # pragma: no cover
     raise ImportError(
         "Real-time audio requires the sounddevice package. "
         "Install it with: pip install sounddevice"

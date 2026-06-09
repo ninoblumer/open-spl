@@ -71,6 +71,18 @@ class TestSLMConfigToml:
         with pytest.raises(ValueError, match="Unknown"):
             SLMConfig.from_toml(toml_path)
 
+    def test_require_not_list_of_strings_raises(self, tmp_path):
+        toml_path = tmp_path / "bad.toml"
+        toml_path.write_text('[metrics]\nrequire = [1, 2]\n', encoding="utf-8")
+        with pytest.raises(ValueError, match="list of strings"):
+            SLMConfig.from_toml(toml_path)
+
+    def test_non_positive_dt_raises(self, tmp_path):
+        toml_path = tmp_path / "bad.toml"
+        toml_path.write_text('[measurement]\ndt = -1.0\n', encoding="utf-8")
+        with pytest.raises(ValueError, match="dt must be positive"):
+            SLMConfig.from_toml(toml_path)
+
     def test_file_created(self, tmp_path):
         config = SLMConfig(metrics=["LAeq"], dt=1.0, output="out")
         toml_path = tmp_path / "sub" / "config.toml"

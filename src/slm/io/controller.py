@@ -27,6 +27,12 @@ class Controller(ABC):
     @abstractmethod
     def sensitivity(self) -> float: ...
 
+    @property
+    @abstractmethod
+    def overruns(self) -> int:
+        """Blocks dropped because the engine fell behind."""
+        ...
+
     @abstractmethod
     def read_block(self) -> tuple[np.ndarray, int]:
         """ read a block of audio and returns the buffer and the block_index """
@@ -53,19 +59,13 @@ class Controller(ABC):
     # ------------------------------------------------------------------
     # Lifecycle / telemetry — uniform across sources so the caller never has to
     # special-case the source type.  Real-time controllers override these; the
-    # defaults suit pull-based sources (e.g. files): start is a no-op, no blocks
-    # are dropped, and there is no live load telemetry.
+    # defaults suit pull-based sources (e.g. files): start is a no-op and there
+    # is no live load telemetry.
     # ------------------------------------------------------------------
 
     def start(self) -> None:
         """Begin producing audio.  No-op for pull-based sources (e.g. files);
         real-time sources override this to launch their producer."""
-
-    @property
-    def overruns(self) -> int:
-        """Blocks dropped because the engine fell behind.  Sources that cannot
-        drop blocks report 0."""
-        return 0
 
     def load_status(self) -> str | None:
         """One-line load/queue telemetry for the live display, or ``None`` when

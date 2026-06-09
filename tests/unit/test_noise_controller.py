@@ -165,6 +165,33 @@ class TestNonRealtimeMode:
         ctrl.stop()
         assert ctrl.overruns > 0
 
+    def test_non_realtime_blocks_on_full_queue(self):
+        """realtime=False: when the consumer never reads, the producer fills the
+        queue then blocks retrying put() (queue.Full path), without overrunning."""
+        ctrl = _make_controller(blocksize=64, realtime=False, queue_maxsize=1)
+        ctrl.start()
+        time.sleep(0.25)  # > 2x the 0.1s put timeout: producer retries a full queue
+        ctrl.stop()
+        assert ctrl.overruns == 0  # non-realtime mode never drops blocks
+
+
+class TestNBlocksLimit:
+
+    def test_n_blocks_stops_producer(self):
+        """n_blocks caps how many blocks the producer emits, then it self-stops."""
+        ctrl = _make_controller(blocksize=64, realtime=False,
+                                queue_maxsize=16, n_blocks=3)
+        ctrl.start()
+        blocks = []
+        try:
+            while True:
+                blocks.append(ctrl.read_block())
+        except StopIteration:
+            pass
+        finally:
+            ctrl.stop()
+        assert len(blocks) == 3
+
 
 class TestEngineIntegration:
 

@@ -9,51 +9,6 @@ from pyoctaveband import OctaveFilterBank
 from slm.plugin_meter import PluginMeter
 
 
-@njit(parallel=True, cache=True)
-def _sosfilt_all_bands(
-    sos_stack: np.ndarray,
-    x: np.ndarray,
-    zi_stack: np.ndarray,
-    out: np.ndarray,
-) -> None:
-    """Apply SOS filter bank to mono input with all bands processed in parallel.
-
-    sos_stack : float64[n_bands, n_sections, 6]
-    x         : float64[blocksize]  1-D mono input
-    zi_stack  : float64[n_bands, n_sections, 2]  updated in-place
-    out       : float64[n_bands, blocksize]  written in-place
-    """
-    n_bands = sos_stack.shape[0]
-    n_sections = sos_stack.shape[1]
-    n_samples = x.shape[0]
-
-    for b in prange(n_bands):
-        # seed each band's output with the input signal
-        for n in range(n_samples):
-            out[b, n] = x[n]
-
-        # apply sections sequentially (IIR data dependency within each band)
-        for s in range(n_sections):
-            b0 = sos_stack[b, s, 0]
-            b1 = sos_stack[b, s, 1]
-            b2 = sos_stack[b, s, 2]
-            # sos_stack[b, s, 3] is a0, always 1.0 for normalised SOS
-            a1 = sos_stack[b, s, 4]
-            a2 = sos_stack[b, s, 5]
-            z0 = zi_stack[b, s, 0]
-            z1 = zi_stack[b, s, 1]
-
-            for n in range(n_samples):
-                xn = out[b, n]
-                yn = b0 * xn + z0
-                z0 = b1 * xn - a1 * yn + z1
-                z1 = b2 * xn - a2 * yn
-                out[b, n] = yn
-
-            zi_stack[b, s, 0] = z0
-            zi_stack[b, s, 1] = z1
-
-
 class PluginOctaveBand(PluginMeter):
     n_bands: int = property(lambda self: self._filter_bank.num_bands)
     center_frequencies: list[str] = property(lambda self: self._filter_bank.nominal_freq)
@@ -108,3 +63,51 @@ class PluginOctaveBand(PluginMeter):
 
     def to_str(self):
         return f"{type(self).__name__}"
+
+
+#  Excluded from test coverage: Numba compiles this to machine code, so coverage.py cannot trace its body.
+#  It is verified functionally, both against the IEC 61260-1:2014 class-1 filter conformance limits
+#  (tests/iec61260/) and against NTi XL2 hardware RTA reference (tests/xl2/test_xl2_rta.py).
+@njit(parallel=True, cache=True)
+def _sosfilt_all_bands(  # pragma: no cover
+    sos_stack: np.ndarray,
+    x: np.ndarray,
+    zi_stack: np.ndarray,
+    out: np.ndarray,
+) -> None:
+    """Apply SOS filter bank to mono input with all bands processed in parallel.
+
+    sos_stack : float64[n_bands, n_sections, 6]
+    x         : float64[blocksize]  1-D mono input
+    zi_stack  : float64[n_bands, n_sections, 2]  updated in-place
+    out       : float64[n_bands, blocksize]  written in-place
+    """
+    n_bands = sos_stack.shape[0]
+    n_sections = sos_stack.shape[1]
+    n_samples = x.shape[0]
+
+    for b in prange(n_bands):
+        # seed each band's output with the input signal
+        for n in range(n_samples):
+            out[b, n] = x[n]
+
+        # apply sections sequentially (IIR data dependency within each band)
+        for s in range(n_sections):
+            b0 = sos_stack[b, s, 0]
+            b1 = sos_stack[b, s, 1]
+            b2 = sos_stack[b, s, 2]
+            # sos_stack[b, s, 3] is a0, always 1.0 for normalised SOS
+            a1 = sos_stack[b, s, 4]
+            a2 = sos_stack[b, s, 5]
+            z0 = zi_stack[b, s, 0]
+            z1 = zi_stack[b, s, 1]
+
+            for n in range(n_samples):
+                xn = out[b, n]
+                yn = b0 * xn + z0
+                z0 = b1 * xn - a1 * yn + z1
+                z1 = b2 * xn - a2 * yn
+                out[b, n] = yn
+
+            zi_stack[b, s, 0] = z0
+            zi_stack[b, s, 1] = z1

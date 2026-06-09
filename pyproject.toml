@@ -38,3 +38,10 @@ slm = "slm.app.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.coverage.run]
+source = ["slm"]
+omit = [
+    # Entry-point glue (argparse wiring) exercised via subprocess, not imports.
+    "*/__main__.py",
+]

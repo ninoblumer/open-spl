@@ -9,7 +9,7 @@ from slm.io.display import make_display_fn
 try:
     from slm.io.sounddevice_controller import SounddeviceController
     _has_sounddevice = True
-except ImportError:
+except ImportError: # pragma: no cover
     _has_sounddevice = False
 
 __all__ = [

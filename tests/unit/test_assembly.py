@@ -583,6 +583,19 @@ class TestPlanChain:
         assert labels[2] == "PluginFastTimeWeighting"
         assert meter_class_name(plan.meter) == "MaxAccumulator"
 
+    def test_square_node_label(self):
+        """A bare metric (no time-weighting) ends in a square node."""
+        from slm.assembly import plan_chain, node_label
+        plan = plan_chain(parse_metric("LA"))   # bare → freq_weighting + square
+        assert node_label(plan.nodes[-1]) == "PluginSquare"
+
+    def test_bpo_label_variants(self):
+        from slm.assembly import _bpo_label
+        assert _bpo_label(None) == ""            # no band fraction
+        assert _bpo_label(1.0) == "1/1"          # whole-octave
+        assert _bpo_label(3.0) == "1/3"          # third-octave
+        assert _bpo_label(1.5) == "1.5/oct"      # non-integer fraction
+
 
 # ---------------------------------------------------------------------------
 # assemble_engine factory + on_record boundary

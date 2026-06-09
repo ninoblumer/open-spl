@@ -113,6 +113,7 @@ class TestEngineMultichannelGuard:
             samplerate = SAMPLERATE
             blocksize = BLOCKSIZE
             sensitivity = 1.0
+            overruns = 0
             _counter = itertools.count(0)
 
             def read_block(self):

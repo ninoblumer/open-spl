@@ -53,6 +53,26 @@ class TestFileControllerBasics:
         ctrl.stop()
         assert ctrl.done
 
+    def test_pull_source_telemetry_defaults(self, tmp_path):
+        """A pull-based source uses the Controller base defaults: no dropped
+        blocks and no live load telemetry."""
+        wav = tmp_path / "sine.wav"
+        _write_sine(wav)
+        from slm.io.file_controller import FileController
+        ctrl = FileController(str(wav), blocksize=1024)
+        assert ctrl.overruns == 0
+        assert ctrl.load_status() is None
+
+    def test_context_manager(self, tmp_path):
+        """Controller.__enter__/__exit__ start the (no-op) source and stop it."""
+        wav = tmp_path / "sine.wav"
+        _write_sine(wav)
+        from slm.io.file_controller import FileController
+        with FileController(str(wav), blocksize=1024) as ctrl:
+            block, _ = ctrl.read_block()
+            assert block.shape[1] == 1
+        assert ctrl.done
+
     def test_overruns_property_zero(self, tmp_path):
         wav = tmp_path / "sine.wav"
         _write_sine(wav)

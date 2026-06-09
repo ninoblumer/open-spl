@@ -234,6 +234,25 @@ class TestLoadMonitoring:
         assert ctrl.queue_depth_max >= 0
 
 
+class TestCalibrate:
+
+    def test_calibrate_sets_sensitivity(self):
+        """calibrate() opens a stream, runs calibrate_sensitivity, then stores
+        the derived sensitivity and closes the stream."""
+        ctrl = _make_controller(queue_maxsize=4)
+        fake = _FakeStream(ctrl._callback, n_blocks=0, blocksize=1_024, channels=1)
+
+        with patch("slm.io.sounddevice_controller.sd.InputStream",
+                   return_value=fake), \
+             patch("slm.calibration.calibrate_sensitivity",
+                   return_value=0.5) as mock_cal:
+            ctrl.calibrate()
+
+        mock_cal.assert_called_once()
+        assert ctrl.sensitivity == pytest.approx(0.5)
+        assert fake.closed   # finally-block stop() closed the stream
+
+
 class TestListDevices:
 
     def test_returns_list_of_dicts(self):
