@@ -373,6 +373,26 @@ Unknown top-level sections or unknown keys within a section raise a `ValueError`
 
 ---
 
+## Running the tests
+
+The test suite lives under `tests/` (unit tests plus IEC 61260-1 / 61672-1 conformance and
+XL2 hardware-comparison integration tests). Run it with pytest:
+
+```bash
+python -m pytest tests/ -q
+```
+
+### Slow tests
+
+A few long-running conformance tests are marked `@pytest.mark.slow` and are **skipped by
+default**. Pass `--slow` to include them:
+
+```bash
+python -m pytest tests/ -q --slow
+```
+
+---
+
 ## Real-time load benchmark
 
 The benchmark characterises how much CPU time the SLM engine consumes relative to the
