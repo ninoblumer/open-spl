@@ -280,7 +280,7 @@ def make_fig_4_1():
     z_meas_96  = np.array([_measure_gain_db(PluginZWeighting, f, duration_s=MEAS_DURATION_S, skip_s=MEAS_SKIP_S,
                                              samplerate=96000) for f in freqs_tbl])
 
-    # Smooth tolerance bands: linearly interpolate TABLE3 limits on log-freq grid
+    # Smooth acceptance-limit bands: linearly interpolate TABLE3 limits on log-freq grid
     log_f_tbl = np.log10(freqs_tbl)
     log_f_d   = np.log10(freqs_dense)
     cl1_lo_fill = np.where(np.isfinite(cl1_lo), cl1_lo, -200.0)
@@ -300,7 +300,7 @@ def make_fig_4_1():
         ))
         ax.set_xlabel("Frequency (Hz)", fontsize=8)
 
-    LEG_TOL = "Class 1 tolerance"
+    LEG_TOL = "Class 1 acceptance limits"
     LEG_48  = "Implementation (48 kHz)"
     LEG_96  = "Implementation (96 kHz)"
 
@@ -421,7 +421,7 @@ def make_fig_4_2():
     a_dev_96   = a_meas_96  - a_goals
     c_dev_96   = c_meas_96  - c_goals
 
-    LEG_TOL = "Class 1 tolerance"
+    LEG_TOL = "Class 1 acceptance limits"
     LEG_48  = "Implementation (48 kHz)"
     LEG_96  = "Implementation (96 kHz)"
 
@@ -507,11 +507,11 @@ def make_fig_4_3():
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    # ── tolerance wedges (gray) ───────────────────────────────────────────────
+    # ── acceptance-limit wedges (gray) ────────────────────────────────────────
     t_w = np.array([0.0, 3.5])
     tol_fill = ax.fill_between(t_w, -F_HI * t_w, -F_LO * t_w,
                                color=C_FILL, alpha=0.9, zorder=1,
-                               label="Class 1 tolerance")
+                               label="Class 1 acceptance limits")
     ax.fill_between(t_w, -S_HI * t_w, -S_LO * t_w,
                     color=C_FILL, alpha=0.9, zorder=1)
 
@@ -531,14 +531,14 @@ def make_fig_4_3():
     ax.set_title("IEC 61672-1:2013 §5.8 — Time Weighting Decay")
     ax.legend(loc="upper right", bbox_to_anchor=(0.97, 0.95), fontsize=8)
 
-    # ── inset: bar chart of decay rates with tolerance ────────────────────────
+    # ── inset: bar chart of decay rates with acceptance limits ────────────────
     ax_in = ax.inset_axes([0.4575, 0.13, 0.5125, 0.45])
     ax_in.set_facecolor("white")
 
     w = 0.55
     x_F, x_S = 0, 1
 
-    # Tolerance rectangles
+    # Acceptance-limit rectangles
     for x, lo, hi in [(x_F, F_LO, F_HI), (x_S, S_LO, S_HI)]:
         ax_in.add_patch(mpatches.Rectangle(
             (x - w/2, lo), w, hi - lo, color=C_FILL, zorder=2))
@@ -610,7 +610,7 @@ def make_fig_4_4():
 
     def _burst_panel(ax, bms, ref_vals, ref_dense, meas_vals, dev_vals,
                      lo, hi, ylabel, title):
-        # Tolerance band — extend half a step past the end points (proportional
+        # Acceptance-limit band — extend half a step past the end points (proportional
         # to each panel's own duration range) so every band segment is uniform.
         bms_ext = np.concatenate([[bms[0] * 1.5],  bms,       [bms[-1] * 0.8]])
         ref_ext = np.concatenate([[ref_vals[0]],  ref_vals, [ref_vals[-1]]])
@@ -618,7 +618,7 @@ def make_fig_4_4():
         hi_ext  = np.concatenate([[hi[0]],    hi,   [hi[-1]]])
         ax.fill_between(bms_ext, ref_ext + lo_ext, ref_ext + hi_ext,
                         step="mid", color=C_FILL, alpha=0.5,
-                        label="Class 1 tolerance")
+                        label="Class 1 acceptance limits")
 
         # Reference curve
         ax.plot(t_dense * 1000, ref_dense, color=C_GREY, lw=1.5, ls="--",
@@ -681,7 +681,7 @@ def make_fig_4_5():
     ax_t.set_title("IEC 61672-1:2013 §5.6 — Level Linearity (Class 1)")
 
     # Bottom — residuals
-    ax_b.axhspan(-0.8, 0.8, color=C_FILL, alpha=0.4, label="Class 1 tolerance")
+    ax_b.axhspan(-0.8, 0.8, color=C_FILL, alpha=0.4, label="Class 1 acceptance limits")
     ax_b.axhline(0, color="black", lw=0.8)
 
     in_tol = np.abs(residuals) <= 0.8
@@ -702,9 +702,9 @@ def make_fig_4_5():
     ax_b.set_xlabel("Input level (dB SPL)")
     ax_b.set_ylabel("Deviation (dB)")
 
-    # Unified legend: tolerance first, then top-panel entries
+    # Unified legend: acceptance limits first, then top-panel entries
     handles_t, labels_t = ax_t.get_legend_handles_labels()
-    handles_b, labels_b = ax_b.get_legend_handles_labels()   # only "Class 1 tolerance"
+    handles_b, labels_b = ax_b.get_legend_handles_labels()   # only "Class 1 acceptance limits"
     ax_t.legend(handles_b + handles_t, labels_b + labels_t,
                 fontsize=8, loc="upper left")
 
@@ -713,7 +713,7 @@ def make_fig_4_5():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FIG 4.6 — Octave Band Filter Transfer Function with IEC 61260-1 Tolerance Mask
+# FIG 4.6 — Octave Band Filter Transfer Function with IEC 61260-1 Acceptance-limit Mask
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def make_fig_4_6():
@@ -735,7 +735,7 @@ def make_fig_4_6():
     omega_pb,   atten_pb   = atten_at(1.05)
     omega_full, atten_full = atten_at(4.6)
 
-    # ── tolerance mask with correct discontinuity at band edges ──────────
+    # ── acceptance-limit mask with correct discontinuity at band edges ───
     # IEC 61260-1 §5.10.7: limits change discontinuously at band-edge G^{±0.5}.
     # Implementation: piecewise function; two adjacent Ω values at G^{0.5}
     # produce a near-vertical step in fill_between.
@@ -787,7 +787,7 @@ def make_fig_4_6():
 
     # ── TOP: passband zoom (G⁻¹ to G¹), y-axis inverted ─────────────────
     ax_t.fill_between(omega_m_pb, lo_pb, hi_pb,
-                      color=C_FILL, alpha=0.8, label="Class 1 tolerance")
+                      color=C_FILL, alpha=0.8, label="Class 1 acceptance limits")
     ax_t.plot(omega_pb, atten_pb, color=C_BLUE, lw=1.5, label="Implemented filter")
     ax_t.axhline(0, color="black", lw=0.8)
     ax_t.axvline(1.0,           color="black", lw=0.6, ls=":")
@@ -805,7 +805,7 @@ def make_fig_4_6():
 
     # ── BOTTOM: full range (G⁻⁴ to G⁴), y-axis inverted ─────────────────
     ax_b.fill_between(omega_m_full, lo_full, hi_full,
-                      color=C_FILL, alpha=0.8, label="Class 1 tolerance")
+                      color=C_FILL, alpha=0.8, label="Class 1 acceptance limits")
     ax_b.plot(omega_full, atten_full,
               color=C_BLUE, lw=1.5, label="Implemented filter")
     ax_b.axhline(0, color="black", lw=0.8)
@@ -967,7 +967,7 @@ def make_fig_4_6c():
 
     fig, ax = plt.subplots(figsize=(8, 4))
 
-    ax.axhspan(LO_CL1, HI_CL1, color=C_FILL, alpha=0.5, label="Class 1 tolerance")
+    ax.axhspan(LO_CL1, HI_CL1, color=C_FILL, alpha=0.5, label="Class 1 acceptance limits")
     ax.axhline(0, color="black", lw=0.8)
 
     for f_m in centers:
@@ -982,7 +982,7 @@ def make_fig_4_6c():
                color=C_BLUE, s=28, zorder=5, label="Measured")
     if not np.all(in_tol):
         ax.scatter(freqs_all[~in_tol], devs_all[~in_tol],
-                   color=C_OUT, s=28, zorder=5, marker="x", label="Outside tolerance")
+                   color=C_OUT, s=28, zorder=5, marker="x", label="Outside acceptance limits")
 
     ax.set_xscale("log")
     ax.set_xlim(50, 15000)

@@ -1,11 +1,11 @@
 """IEC 61672-1:2013 §5.5, Table 3 — frequency weighting conformance (class 1).
 
 Tests PluginAWeighting, PluginCWeighting, and PluginZWeighting against the
-Table 3 reference values and class 1 tolerance limits.
+Table 3 reference values and class 1 acceptance limits.
 
 Approach: feed a 3 s pure sine through each plugin, skip the first 0.5 s
 transient, and compare the steady-state RMS gain to the IEC Table 3 goal
-± class 1 tolerance.
+± class 1 acceptance limit.
 """
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def _measure_gain_db(
 # ---------------------------------------------------------------------------
 # IEC 61672-1:2013 Table 3 — weighting reference levels and class 1 limits
 # (freq_hz, A_goal_dB, C_goal_dB, cl1_lo_dB, cl1_hi_dB)
-# cl1_lo = None  →  no lower bound (tolerance is one-sided upward)
+# cl1_lo = None  →  no lower bound (acceptance limit is one-sided upward)
 # ---------------------------------------------------------------------------
 
 _TABLE3 = [
