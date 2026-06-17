@@ -571,6 +571,27 @@ def make_fig_4_3():
 # FIG 4.4 — Toneburst Response vs IEC 61672-1:2013 Table 4
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _stepped_limits(dense_ms, table_ms, lo, hi):
+    """Class 1 limit offsets on a dense duration grid, per IEC 61672-1 §5.9.4.
+
+    For a duration between two Table 4 entries the applicable acceptance limits
+    are those of the next *shorter* tabulated duration, so the limits step at
+    each tabulated duration instead of interpolating.  Returns (lo, hi) arrays,
+    NaN below the shortest tabulated duration where no limits are defined.
+    """
+    order  = np.argsort(table_ms)
+    tm     = np.asarray(table_ms)[order]
+    lo_s   = np.asarray(lo)[order]
+    hi_s   = np.asarray(hi)[order]
+    idx    = np.searchsorted(tm, dense_ms, side="right") - 1   # largest tm <= T
+    out_lo = np.full(np.shape(dense_ms), np.nan)
+    out_hi = np.full(np.shape(dense_ms), np.nan)
+    ok     = idx >= 0
+    out_lo[ok] = lo_s[idx[ok]]
+    out_hi[ok] = hi_s[idx[ok]]
+    return out_lo, out_hi
+
+
 def make_fig_4_4():
     burst_ms   = np.array([r[0] for r in _TABLE4])
     ref_fmax   = np.array([r[1] for r in _TABLE4])
@@ -595,7 +616,7 @@ def make_fig_4_4():
     dev_smax  = meas_smax - ref_smax
 
     # Dense reference curves
-    t_dense        = np.geomspace(0.0001, 1.2, 500)
+    t_dense        = np.geomspace(0.0001, 1.5, 500)
     ref_fmax_dense = 10 * np.log10(np.maximum(1 - np.exp(-t_dense / 0.125), 1e-30))
     ref_sel_dense  = 10 * np.log10(t_dense / 1.0)
     ref_smax_dense = 10 * np.log10(np.maximum(1 - np.exp(-t_dense / 1.0), 1e-30))
@@ -608,16 +629,16 @@ def make_fig_4_4():
     fig, (ax_f, ax_smax, ax_sel) = plt.subplots(3, 1, sharex=True, figsize=(8, 9),
                                                 gridspec_kw={"hspace": 0.28})
 
-    def _burst_panel(ax, bms, ref_vals, ref_dense, meas_vals, dev_vals,
+    dense_ms = t_dense * 1000.0
+
+    def _burst_panel(ax, bms, ref_dense, meas_vals, dev_vals,
                      lo, hi, ylabel, title):
-        # Acceptance-limit band — extend half a step past the end points (proportional
-        # to each panel's own duration range) so every band segment is uniform.
-        bms_ext = np.concatenate([[bms[0] * 1.5],  bms,       [bms[-1] * 0.8]])
-        ref_ext = np.concatenate([[ref_vals[0]],  ref_vals, [ref_vals[-1]]])
-        lo_ext  = np.concatenate([[lo[0]],    lo,   [lo[-1]]])
-        hi_ext  = np.concatenate([[hi[0]],    hi,   [hi[-1]]])
-        ax.fill_between(bms_ext, ref_ext + lo_ext, ref_ext + hi_ext,
-                        step="mid", color=C_FILL, alpha=0.5,
+        # Acceptance-limit band: continuous reference response (Eq. 7/8) plus the
+        # class 1 limit of the next-shorter tabulated duration (§5.9.4), so the
+        # band steps at each Table 4 duration rather than interpolating.
+        lo_step, hi_step = _stepped_limits(dense_ms, bms, lo, hi)
+        ax.fill_between(dense_ms, ref_dense + lo_step, ref_dense + hi_step,
+                        color=C_FILL, alpha=0.5,
                         label="Class 1 acceptance limits")
 
         # Reference curve
@@ -637,13 +658,13 @@ def make_fig_4_4():
         ax.set_ylabel(ylabel)
         ax.set_title(title, fontsize=9)
 
-    _burst_panel(ax_f, burst_ms, ref_fmax, ref_fmax_dense, meas_fmax, dev_fmax,
+    _burst_panel(ax_f, burst_ms, ref_fmax_dense, meas_fmax, dev_fmax,
                  cl1_lo, cl1_hi,
                  r"$\delta_{F_\mathrm{max}}$ (dB)", "4 kHz tone burst, F time weighting")
-    _burst_panel(ax_smax, burst_ms_s, ref_smax, ref_smax_dense, meas_smax, dev_smax,
+    _burst_panel(ax_smax, burst_ms_s, ref_smax_dense, meas_smax, dev_smax,
                  cl1_lo_s, cl1_hi_s,
                  r"$\delta_{S_\mathrm{max}}$ (dB)", "4 kHz tone burst, S time weighting")
-    _burst_panel(ax_sel, burst_ms, ref_sel, ref_sel_dense, meas_sel, dev_sel,
+    _burst_panel(ax_sel, burst_ms, ref_sel_dense, meas_sel, dev_sel,
                  cl1_lo, cl1_hi,
                  r"$\delta_\mathrm{SEL}$ (dB)", "4 kHz tone burst, SEL response")
 
@@ -653,6 +674,80 @@ def make_fig_4_4():
     ax_sel.set_xlabel("Burst duration (ms)")
     ax_f.legend(loc="lower right", fontsize=8)
     fig.suptitle("IEC 61672-1:2013 §5.9 Table 4 — Toneburst Response (Class 1)")
+
+    fig.tight_layout()
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FIG 4.4b — Toneburst Response Deviation from Reference
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def make_fig_4_4b():
+    burst_ms   = np.array([r[0] for r in _TABLE4])
+    ref_fmax   = np.array([r[1] for r in _TABLE4])
+    ref_sel    = np.array([r[2] for r in _TABLE4])
+    cl1_lo     = np.array([r[3] for r in _TABLE4])
+    cl1_hi     = np.array([r[4] for r in _TABLE4])
+
+    burst_ms_s = np.array([r[0] for r in _TABLE4_SMAX])
+    ref_smax   = np.array([r[1] for r in _TABLE4_SMAX])
+    cl1_lo_s   = np.array([r[2] for r in _TABLE4_SMAX])
+    cl1_hi_s   = np.array([r[3] for r in _TABLE4_SMAX])
+
+    print(f"  computing toneburst response for {len(_TABLE4)} burst lengths…")
+    results    = [_toneburst_response(ms / 1000.0) for ms in burst_ms]
+    meas_fmax  = np.array([r[0] for r in results])
+    meas_sel   = np.array([r[1] for r in results])
+    smax_by_ms = {ms: r[2] for ms, r in zip(burst_ms, results)}
+    meas_smax  = np.array([smax_by_ms[ms] for ms in burst_ms_s])
+    dev_fmax   = meas_fmax - ref_fmax
+    dev_sel    = meas_sel  - ref_sel
+    dev_smax   = meas_smax - ref_smax
+
+    # Dense duration grid for the stepped acceptance band.
+    dense_ms = np.geomspace(0.2, 1500, 600)
+
+    tick_ms  = [0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+    tick_lbl = ["0.25", "0.5", "1", "2", "5", "10", "20", "50",
+                "100", "200", "500", "1000"]
+
+    fig, (ax_f, ax_smax, ax_sel) = plt.subplots(3, 1, sharex=True, figsize=(8, 9),
+                                                gridspec_kw={"hspace": 0.28})
+
+    def _dev_panel(ax, bms, dev_vals, lo, hi, ylabel, title):
+        # Stepped class 1 band around zero (§5.9.4: limits snap to the next-shorter
+        # tabulated duration).
+        lo_step, hi_step = _stepped_limits(dense_ms, bms, lo, hi)
+        ax.fill_between(dense_ms, lo_step, hi_step, color=C_FILL, alpha=0.5,
+                        label="Class 1 acceptance limits")
+
+        ax.axhline(0, color=C_GREY, lw=1.5, ls="--", label="IEC 61672-1 reference")
+
+        in_tol = (dev_vals >= lo) & (dev_vals <= hi)
+        colors = [C_BLUE if t else C_OUT for t in in_tol]
+        ax.plot(bms, dev_vals, color=C_BLUE, lw=0.8, alpha=0.4, zorder=4)
+        ax.scatter(bms, dev_vals, c=colors, s=30, zorder=5, label="Measured deviation")
+
+        ax.set_xscale("log")
+        ax.set_xlim(0.2, 1500)
+        ax.set_ylim(-3.5, 1.6)
+        ax.xaxis.set_major_locator(ticker.FixedLocator(tick_ms))
+        ax.xaxis.set_major_formatter(ticker.FixedFormatter(tick_lbl))
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(1.0))
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=9)
+
+    _dev_panel(ax_f, burst_ms, dev_fmax, cl1_lo, cl1_hi,
+               "Deviation (dB)", "4 kHz tone burst, F time weighting")
+    _dev_panel(ax_smax, burst_ms_s, dev_smax, cl1_lo_s, cl1_hi_s,
+               "Deviation (dB)", "4 kHz tone burst, S time weighting")
+    _dev_panel(ax_sel, burst_ms, dev_sel, cl1_lo, cl1_hi,
+               "Deviation (dB)", "4 kHz tone burst, SEL response")
+
+    ax_sel.set_xlabel("Burst duration (ms)")
+    ax_f.legend(loc="lower right", fontsize=8)
+    fig.suptitle("IEC 61672-1:2013 §5.9 Table 4 — Toneburst Response Deviation (Class 1)")
 
     fig.tight_layout()
     return fig
@@ -1297,6 +1392,7 @@ if __name__ == "__main__":
         (make_fig_4_2, "fig_4_2_frequency_weighting_residuals"),
         (make_fig_4_3, "fig_4_3_time_weighting_decay"),
         (make_fig_4_4, "fig_4_4_toneburst_response"),
+        (make_fig_4_4b, "fig_4_4b_toneburst_response_deviation"),
         (make_fig_4_5, "fig_4_5_level_linearity"),
         (make_fig_4_6, "fig_4_6_octave_filter_mask"),
         (make_fig_4_6b, "fig_4_6b_octave_filter_phase_groupdelay"),
