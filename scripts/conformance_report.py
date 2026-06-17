@@ -7,6 +7,7 @@ formatted table of measured values, limits, and margins from each limit.
 Usage:
     python scripts/conformance_report.py
     python scripts/conformance_report.py --no-color
+    python scripts/conformance_report.py --precision 4
 """
 from __future__ import annotations
 
@@ -46,10 +47,10 @@ _B = "\033[1m"  if USE_COLOR else ""   # bold
 _X = "\033[0m"  if USE_COLOR else ""   # reset
 
 
-def _color_margin(margin: float, half_width: float) -> str:
+def _color_margin(margin: float, half_width: float, p: int = 3) -> str:
     pct = margin / half_width * 100 if half_width > 0 else 100.0
     c = _G if pct > 50 else (_Y if pct > 20 else _R)
-    return f"{c}{margin:+7.3f}{_X}"
+    return f"{c}{margin:+7.{p}f}{_X}"
 
 
 def _pass_fail(ok: bool) -> str:
@@ -77,7 +78,7 @@ def _sub(title: str) -> None:
 # Section printers
 # ---------------------------------------------------------------------------
 
-def _print_weighting_section(title: str, rows: list[dict]) -> None:
+def _print_weighting_section(title: str, rows: list[dict], p: int = 3) -> None:
     """Print a frequency-weighting or toneburst/cpeak margin table."""
     _hdr(title)
     print(f"  {'Label':>14}  {'Dev (dB)':>9}  {'Lo':>7}  {'Hi':>7}  {'Margin':>8}  {'':4}")
@@ -93,14 +94,14 @@ def _print_weighting_section(title: str, rows: list[dict]) -> None:
         half = (hi if lo is None else (hi - lo) / 2) if hi is not None else abs(lo)
         lo_str = f"{lo:+.1f}" if lo is not None else "  n/a"
         hi_str = f"{hi:+.1f}" if hi is not None else "  n/a"
-        print(f"  {r['label']:>14}  {dev:>+9.4f}  {lo_str:>7}  {hi_str:>7}  "
-              f"{_color_margin(margin, half)}  {_pass_fail(ok)}")
+        print(f"  {r['label']:>14}  {dev:>+9.{p}f}  {lo_str:>7}  {hi_str:>7}  "
+              f"{_color_margin(margin, half, p)}  {_pass_fail(ok)}")
     worst = min(rows, key=lambda r: r["margin"])
-    print(f"\n  Worst margin: {worst['margin']:+.4f} dB @ {worst['label']}"
+    print(f"\n  Worst margin: {worst['margin']:+.{p}f} dB @ {worst['label']}"
           f"  --  {_pass_fail(not any_fail)}")
 
 
-def _print_rate_section(title: str, rows: list[dict]) -> None:
+def _print_rate_section(title: str, rows: list[dict], p: int = 3) -> None:
     """Print a time-weighting decay-rate table."""
     _hdr(title)
     print(f"  {'Label':>10}  {'Rate (dB/s)':>12}  {'Lo':>7}  {'Hi':>7}  {'Margin':>8}  {'':4}")
@@ -113,12 +114,12 @@ def _print_rate_section(title: str, rows: list[dict]) -> None:
         ok = lo <= rate <= hi
         any_fail = any_fail or not ok
         half = (hi - lo) / 2
-        print(f"  {r['label']:>10}  {rate:>12.4f}  {lo:>7.1f}  {hi:>7.1f}  "
-              f"{_color_margin(margin, half)}  {_pass_fail(ok)}")
+        print(f"  {r['label']:>10}  {rate:>12.{p}f}  {lo:>7.1f}  {hi:>7.1f}  "
+              f"{_color_margin(margin, half, p)}  {_pass_fail(ok)}")
     print(f"\n  Overall: {_pass_fail(not any_fail)}")
 
 
-def _print_linearity_section(title: str, rows: list[dict]) -> None:
+def _print_linearity_section(title: str, rows: list[dict], p: int = 3) -> None:
     """Print a level-linearity table (value vs upper limit)."""
     _hdr(title)
     print(f"  {'Metric':<22}  {'Value':>8}  {'Limit':>7}  {'Margin':>8}  {'Note'}")
@@ -131,12 +132,12 @@ def _print_linearity_section(title: str, rows: list[dict]) -> None:
         ok = val <= lim
         any_fail = any_fail or not ok
         note = f"  ({r['note']})" if r.get("note") else ""
-        print(f"  {r['label']:<22}  {val:>8.4f}  {lim:>7.3f}  "
-              f"{_color_margin(margin, lim)}  {_pass_fail(ok)}{note}")
+        print(f"  {r['label']:<22}  {val:>8.{p}f}  {lim:>7.3f}  "
+              f"{_color_margin(margin, lim, p)}  {_pass_fail(ok)}{note}")
     print(f"\n  Overall: {_pass_fail(not any_fail)}")
 
 
-def _print_filter_section(title: str, rows: list[dict]) -> None:
+def _print_filter_section(title: str, rows: list[dict], p: int = 3) -> None:
     """Print a pass-band or stop-band filter margin table (worst per band)."""
     _hdr(title)
     # Group by band label prefix (e.g. "63 Hz …") — use worst margin per band
@@ -165,12 +166,12 @@ def _print_filter_section(title: str, rows: list[dict]) -> None:
             half = (hi - lo) / 2
         lo_str = f"{lo:+.1f}" if lo is not None else "  n/a"
         hi_str = f"{hi:+.1f}" if hi is not None else "  n/a"
-        print(f"  {band_key:>8}  {dev:>+9.4f}  {lo_str:>7}  {hi_str:>7}  "
-              f"{_color_margin(margin, half)}  {_pass_fail(ok)}")
+        print(f"  {band_key:>8}  {dev:>+9.{p}f}  {lo_str:>7}  {hi_str:>7}  "
+              f"{_color_margin(margin, half, p)}  {_pass_fail(ok)}")
     print(f"\n  Overall: {_pass_fail(not any_fail)}")
 
 
-def _print_bw_section(title: str, rows: list[dict]) -> None:
+def _print_bw_section(title: str, rows: list[dict], p: int = 3) -> None:
     """Print an effective-bandwidth deviation table."""
     _hdr(title)
     print(f"  {'Band':>8}  {'DB (dB)':>9}  {'|DB|':>7}  {'Limit':>7}  {'Margin':>8}  {'':4}")
@@ -182,8 +183,8 @@ def _print_bw_section(title: str, rows: list[dict]) -> None:
         margin = r["margin"]
         ok = abs(db) <= lim
         any_fail = any_fail or not ok
-        print(f"  {r['label']:>8}  {db:>+9.4f}  {abs(db):>7.4f}  "
-              f"±{lim:>5.3f}  {_color_margin(margin, lim)}  {_pass_fail(ok)}")
+        print(f"  {r['label']:>8}  {db:>+9.{p}f}  {abs(db):>7.{p}f}  "
+              f"±{lim:>5.3f}  {_color_margin(margin, lim, p)}  {_pass_fail(ok)}")
     print(f"\n  Overall: {_pass_fail(not any_fail)}")
 
 
@@ -191,26 +192,27 @@ def _print_bw_section(title: str, rows: list[dict]) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+def main(precision: int = 3) -> None:
+    p = precision
     print(f"\n{_B}IEC 61672-1:2013 / IEC 61260-1:2014 Conformance Margin Report{_X}")
 
     # --- IEC 61672-1 §5.5 Frequency weightings ---
     a_test = TestAWeightingClass1()
     _print_weighting_section(
         "IEC 61672-1 §5.5 A-weighting (class 1)",
-        [a_test.test_gain_within_class1(row, report=True) for row in _TABLE3],
+        [a_test.test_gain_within_class1(row, report=True) for row in _TABLE3], p,
     )
 
     c_test = TestCWeightingClass1()
     _print_weighting_section(
         "IEC 61672-1 §5.5 C-weighting (class 1)",
-        [c_test.test_gain_within_class1(row, report=True) for row in _TABLE3],
+        [c_test.test_gain_within_class1(row, report=True) for row in _TABLE3], p,
     )
 
     z_test = TestZWeightingFlat()
     _print_weighting_section(
         "IEC 61672-1 Annex E.5 Z-weighting (flat, ±0.1 dB)",
-        [z_test.test_gain_is_zero(row, report=True) for row in _TABLE3],
+        [z_test.test_gain_is_zero(row, report=True) for row in _TABLE3], p,
     )
 
     # --- IEC 61672-1 §5.8 Time-weighting decay rates ---
@@ -219,33 +221,33 @@ def main() -> None:
         [
             TestFastTimeWeightingDecayRate().test_decay_rate_4khz(report=True),
             TestSlowTimeWeightingDecayRate().test_decay_rate_4khz(report=True),
-        ],
+        ], p,
     )
 
     # --- IEC 61672-1 §5.9 Toneburst response ---
     fmax_test = TestFmaxToneburst()
     _print_weighting_section(
         "IEC 61672-1 §5.9 F-max toneburst (class 1)",
-        [fmax_test.test_fmax_vs_table4(row, report=True) for row in _TABLE4],
+        [fmax_test.test_fmax_vs_table4(row, report=True) for row in _TABLE4], p,
     )
 
     smax_test = TestSmaxToneburst()
     _print_weighting_section(
         "IEC 61672-1 §5.9 S-max toneburst (class 1)",
-        [smax_test.test_smax_vs_table4(row, report=True) for row in _TABLE4_SMAX],
+        [smax_test.test_smax_vs_table4(row, report=True) for row in _TABLE4_SMAX], p,
     )
 
     sel_test = TestSELToneburst()
     _print_weighting_section(
         "IEC 61672-1 §5.9 SEL toneburst (class 1)",
-        [sel_test.test_sel_vs_table4(row, report=True) for row in _TABLE4],
+        [sel_test.test_sel_vs_table4(row, report=True) for row in _TABLE4], p,
     )
 
     # --- IEC 61672-1 §5.13 C-weighted peak ---
     cpeak_test = TestCWeightedPeak()
     _print_weighting_section(
         "IEC 61672-1 §5.13 C-weighted peak L_Cpeak - L_C (class 1)",
-        [cpeak_test.test_cpeak_minus_lc(row, report=True) for row in _TABLE5],
+        [cpeak_test.test_cpeak_minus_lc(row, report=True) for row in _TABLE5], p,
     )
 
     # --- IEC 61672-1 §5.6 Level linearity ---
@@ -258,27 +260,27 @@ def main() -> None:
             lin_test.test_residuals_within_08dB(report=True),
             lin_test.test_slope_is_unity(report=True),
             inc_test.test_1dB_steps(report=True),
-        ],
+        ], p,
     )
 
     # --- IEC 61260-1 §5.10 Pass-band ---
     pb_test = TestOctaveRelativeAttenuation()
     _print_filter_section(
         "IEC 61260-1 §5.10 Octave pass-band attenuation (class 1, worst per band)",
-        [pb_test.test_passband(row, report=True) for row in _PB_PARAMS],
+        [pb_test.test_passband(row, report=True) for row in _PB_PARAMS], p,
     )
 
     # --- IEC 61260-1 §5.10 Stop-band ---
     _print_filter_section(
         "IEC 61260-1 §5.10 Octave stop-band attenuation (class 1, worst per band)",
-        [pb_test.test_stopband(row, report=True) for row in _SB_PARAMS],
+        [pb_test.test_stopband(row, report=True) for row in _SB_PARAMS], p,
     )
 
     # --- IEC 61260-1 §5.12 Effective bandwidth ---
     bw_test = TestOctaveEffectiveBandwidth()
     _print_bw_section(
         "IEC 61260-1 §5.12 Effective bandwidth deviation DB (class 1)",
-        [bw_test.test_bandwidth_deviation(i, report=True) for i in range(8)],
+        [bw_test.test_bandwidth_deviation(i, report=True) for i in range(8)], p,
     )
 
     print()
@@ -288,4 +290,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--no-color", action="store_true",
+                        help="disable ANSI colour output")
+    parser.add_argument("--precision", type=int, default=3, metavar="N",
+                        help="decimal places for reported values and margins (default: 3)")
+    args = parser.parse_args()
+    main(precision=args.precision)
