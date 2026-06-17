@@ -154,11 +154,14 @@ class TestCWeightedPeak:
 class TestCPeakHalfCycleSymmetry:
     """IEC 61672-1 §5.13 — positive and negative half-cycles give equal L_Cpeak."""
 
-    def test_half_cycle_symmetry_500hz(self):
+    def test_half_cycle_symmetry_500hz(self, report: bool = False):
         """Difference between positive and negative half-cycle peaks ≤ 1.5 dB."""
         diff_pos = _cpeak_minus_lc(500, "pos_half")
         diff_neg = _cpeak_minus_lc(500, "neg_half")
         asymmetry = abs(diff_pos - diff_neg)
+        if report:
+            return {"label": "pos/neg half-cycle @ 500 Hz", "value": asymmetry,
+                    "limit": 1.5, "margin": 1.5 - asymmetry}
         assert asymmetry <= 1.5, (
             f"|L_Cpeak(pos) − L_Cpeak(neg)| = {asymmetry:.4f} dB "
             f"(limit: 1.5 dB)"

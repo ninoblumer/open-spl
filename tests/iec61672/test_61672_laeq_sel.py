@@ -82,22 +82,26 @@ def _measure(signal: np.ndarray) -> tuple[float, float, int]:
 class TestLeqFormula:
     """IEC 61672-1 §3.9 — L_Aeq,T = 10·log₁₀((1/T)·∫p_A²dt / p₀²)."""
 
-    def test_laeq_1khz_unit_amplitude(self):
+    def test_laeq_1khz_unit_amplitude(self, report: bool = False):
         """A-weighted Leq of 1 kHz unit-amplitude sine matches analytic value."""
         A = 1.0  # Pa
         # Analytic: L_Aeq = 10·log₁₀(A²/2 / p₀²); A-weighting at 1 kHz = 0 dB.
         l_expected = 10.0 * np.log10(A ** 2 / 2.0 / p0 ** 2)
 
-        n_samples = _trim(_make_sine(1000, A, int(5.0 * SAMPLERATE)))
         signal    = _trim(_make_sine(1000, A, int(5.0 * SAMPLERATE)))
         l_aeq, _, _ = _measure(signal)
 
+        dev = l_aeq - l_expected
+        if report:
+            return {"label": "L_Aeq 1 kHz unit", "deviation": dev,
+                    "limit_lo": -0.05, "limit_hi": 0.05,
+                    "margin": min(dev + 0.05, 0.05 - dev)}
         assert abs(l_aeq - l_expected) <= 0.05, (
             f"L_Aeq = {l_aeq:.4f} dB, expected {l_expected:.4f} dB, "
             f"deviation = {l_aeq - l_expected:+.4f} dB (limit: ±0.05 dB)"
         )
 
-    def test_laeq_consistent_across_durations(self):
+    def test_laeq_consistent_across_durations(self, report: bool = False):
         """L_Aeq of a stationary 1 kHz sine is independent of integration time."""
         A = 1.0
         durations_s = [1.0, 3.0, 5.0, 10.0]
@@ -108,6 +112,9 @@ class TestLeqFormula:
             leq_values.append(l_aeq)
 
         spread = max(leq_values) - min(leq_values)
+        if report:
+            return {"label": "L_Aeq duration spread", "value": spread,
+                    "limit": 0.1, "margin": 0.1 - spread}
         assert spread <= 0.1, (
             f"L_Aeq spread over {durations_s} s: {spread:.4f} dB "
             f"(limit: ±0.05 dB each → spread ≤ 0.1 dB)\n"
@@ -122,7 +129,7 @@ class TestLeqFormula:
 class TestSELFormula:
     """IEC 61672-1 §3.12 — L_AE,T = L_Aeq,T + 10·log₁₀(T/T₀)."""
 
-    def test_sel_equals_leq_plus_duration_term(self):
+    def test_sel_equals_leq_plus_duration_term(self, report: bool = False):
         """L_AE − L_Aeq = 10·log₁₀(T/T₀) for a stationary 1 kHz sine."""
         A       = 1.0
         dur_s   = 5.0
@@ -133,13 +140,18 @@ class TestSELFormula:
 
         expected_diff = 10.0 * np.log10(T_actual / T0)
         measured_diff = l_ae - l_aeq
+        dev = measured_diff - expected_diff
+        if report:
+            return {"label": "L_AE - L_Aeq = 10log(T/T0)", "deviation": dev,
+                    "limit_lo": -0.05, "limit_hi": 0.05,
+                    "margin": min(dev + 0.05, 0.05 - dev)}
         assert abs(measured_diff - expected_diff) <= 0.05, (
             f"L_AE − L_Aeq = {measured_diff:.4f} dB, "
             f"expected 10·log₁₀({T_actual:.3f}) = {expected_diff:.4f} dB, "
             f"deviation = {measured_diff - expected_diff:+.4f} dB (limit: ±0.05 dB)"
         )
 
-    def test_sel_reference_exposure(self):
+    def test_sel_reference_exposure(self, report: bool = False):
         """E₀ = p₀²·T₀ = (20 µPa)²·1 s = 400×10⁻¹² Pa²·s (§3.12 note).
 
         A 1 kHz sine at 0 dB SPL (RMS = p₀) over T₀ = 1 s should give L_AE = 0 dB.
@@ -153,6 +165,11 @@ class TestSELFormula:
 
         # L_Aeq ≈ 0 dB SPL; L_AE ≈ 0 + 10·log₁₀(T_actual) ≈ 10·log₁₀(T_actual) dB
         expected_l_ae = 10.0 * np.log10(T_actual / T0)  # ≈ 0 dB when T≈T₀
+        dev = l_ae - expected_l_ae
+        if report:
+            return {"label": "SEL reference exposure", "deviation": dev,
+                    "limit_lo": -0.05, "limit_hi": 0.05,
+                    "margin": min(dev + 0.05, 0.05 - dev)}
         assert abs(l_ae - expected_l_ae) <= 0.05, (
             f"L_AE = {l_ae:.4f} dB, expected {expected_l_ae:.4f} dB "
             f"(deviation {l_ae - expected_l_ae:+.4f} dB, limit: ±0.05 dB)"
@@ -220,7 +237,7 @@ class TestRepeatedTonebursts:
     """
 
     @pytest.mark.parametrize("row", _REPEATED, ids=_REPEATED_IDS)
-    def test_repeated_toneburst(self, row):
+    def test_repeated_toneburst(self, row, report: bool = False):
         n_bursts, T_b_ms, T_m_s, eff_ms = row
         ref_sel, cl1_lo, cl1_hi = _TABLE4_SEL[eff_ms]
 
@@ -235,6 +252,10 @@ class TestRepeatedTonebursts:
         delta  = l_aeq - l_a
         dev    = delta - ref_sel
 
+        margin = min(dev - cl1_lo, cl1_hi - dev)
+        if report:
+            return {"label": f"n={n_bursts}, T_b={T_b_ms} ms", "deviation": dev,
+                    "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         assert cl1_lo <= dev <= cl1_hi, (
             f"n={n_bursts}, T_b={T_b_ms} ms, T_m={T_m_s} s: "
             f"δ = {delta:.3f} dB, ref = {ref_sel:.1f} dB, "

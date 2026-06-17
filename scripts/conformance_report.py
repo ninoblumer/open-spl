@@ -14,24 +14,45 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT))
+# Some IEC 61260 test modules import their siblings by bare name (relying on
+# pytest's per-directory sys.path insertion); replicate that for standalone use.
+sys.path.insert(0, str(_ROOT / "tests" / "iec61260"))
 
 from tests.iec61672.test_61672_frequency_weightings import (
-    TestAWeightingClass1, TestCWeightingClass1, TestZWeightingFlat, _TABLE3,
+    TestAWeightingClass1, TestCWeightingClass1, TestZWeightingFlat,
+    TestNormalisationAt1kHz, TestWeightingDifferencesAt1kHz, _TABLE3,
 )
 from tests.iec61672.test_61672_time_weightings import (
     TestFastTimeWeightingDecayRate, TestSlowTimeWeightingDecayRate,
+    TestFvsSteadyState,
 )
 from tests.iec61672.test_61672_toneburst import (
     TestFmaxToneburst, TestSELToneburst, TestSmaxToneburst, _TABLE4, _TABLE4_SMAX,
 )
-from tests.iec61672.test_61672_cpeak import TestCWeightedPeak, _TABLE5
+from tests.iec61672.test_61672_cpeak import (
+    TestCWeightedPeak, TestCPeakHalfCycleSymmetry, _TABLE5,
+)
 from tests.iec61672.test_61672_level_linearity import (
     TestLevelLinearityTotalRange, TestLevelLinearityIncremental,
+    TestLinearRangeWidth,
+)
+from tests.iec61672.test_61672_laeq_sel import (
+    TestLeqFormula, TestSELFormula, TestRepeatedTonebursts, _REPEATED,
 )
 from tests.iec61260.test_61260_1_filters import (
     TestOctaveRelativeAttenuation, TestOctaveEffectiveBandwidth,
-    _PB_PARAMS, _SB_PARAMS, _BAND_IDS,
+    TestOctaveBandEdges, _PB_PARAMS, _SB_PARAMS, _BAND_IDS,
+)
+from tests.iec61260.test_61260_1_summation import (
+    TestSummationOfOutputSignals, _PARAMS as _SUMMATION_PARAMS,
+)
+from tests.iec61260.test_61260_1_level_linearity import (
+    TestLinearOperatingRange, _centers as _LIN_CENTERS,
+)
+from tests.iec61260.test_61260_1_time_invariant import (
+    TestTimeInvariantOperation, _centers as _TI_CENTERS,
 )
 
 # ---------------------------------------------------------------------------
@@ -215,6 +236,25 @@ def main(precision: int = 3) -> None:
         [z_test.test_gain_is_zero(row, report=True) for row in _TABLE3], p,
     )
 
+    norm_test = TestNormalisationAt1kHz()
+    _print_weighting_section(
+        "IEC 61672-1 §5.5 Normalisation at 1 kHz (0 dB ± 0.05 dB)",
+        [
+            norm_test.test_a_weighting(report=True),
+            norm_test.test_c_weighting(report=True),
+            norm_test.test_z_weighting(report=True),
+        ], p,
+    )
+
+    diff_test = TestWeightingDifferencesAt1kHz()
+    _print_weighting_section(
+        "IEC 61672-1 §5.5.9 Weighting differences at 1 kHz (± 0.2 dB)",
+        [
+            diff_test.test_c_minus_a(report=True),
+            diff_test.test_z_minus_a(report=True),
+        ], p,
+    )
+
     # --- IEC 61672-1 §5.8 Time-weighting decay rates ---
     _print_rate_section(
         "IEC 61672-1 §5.8 Time-weighting decay rates (class 1)",
@@ -222,6 +262,12 @@ def main(precision: int = 3) -> None:
             TestFastTimeWeightingDecayRate().test_decay_rate_4khz(report=True),
             TestSlowTimeWeightingDecayRate().test_decay_rate_4khz(report=True),
         ], p,
+    )
+
+    # --- IEC 61672-1 §5.8.3 F / S / Leq agreement at 1 kHz ---
+    _print_weighting_section(
+        "IEC 61672-1 §5.8.3 F / S / Leq agreement at 1 kHz (± 0.1 dB)",
+        TestFvsSteadyState().test_steady_1khz(report=True), p,
     )
 
     # --- IEC 61672-1 §5.9 Toneburst response ---
@@ -241,6 +287,13 @@ def main(precision: int = 3) -> None:
     _print_weighting_section(
         "IEC 61672-1 §5.9 SEL toneburst (class 1)",
         [sel_test.test_sel_vs_table4(row, report=True) for row in _TABLE4], p,
+    )
+
+    # --- IEC 61672-1 §5.10 Repeated tonebursts ---
+    rep_test = TestRepeatedTonebursts()
+    _print_weighting_section(
+        "IEC 61672-1 §5.10 Repeated tonebursts (class 1)",
+        [rep_test.test_repeated_toneburst(row, report=True) for row in _REPEATED], p,
     )
 
     # --- IEC 61672-1 §5.13 C-weighted peak ---
@@ -263,6 +316,40 @@ def main(precision: int = 3) -> None:
         ], p,
     )
 
+    _print_weighting_section(
+        "IEC 61672-1 §5.6 Linear operating range (>= 60 dB at 1 kHz)",
+        [TestLinearRangeWidth().test_linear_range_at_least_60dB(report=True)], p,
+    )
+
+    # --- IEC 61672-1 §3.9 / §3.12 L_Aeq and SEL formulae ---
+    leq_test = TestLeqFormula()
+    sel_form = TestSELFormula()
+    _print_weighting_section(
+        "IEC 61672-1 §3.9 / §3.12 L_Aeq and SEL formulae (± 0.05 dB)",
+        [
+            leq_test.test_laeq_1khz_unit_amplitude(report=True),
+            sel_form.test_sel_equals_leq_plus_duration_term(report=True),
+            sel_form.test_sel_reference_exposure(report=True),
+        ], p,
+    )
+
+    # --- Scalar consistency checks (value vs upper limit) ---
+    _print_linearity_section(
+        "IEC 61672-1 scalar consistency checks",
+        [
+            leq_test.test_laeq_consistent_across_durations(report=True),
+            TestCPeakHalfCycleSymmetry().test_half_cycle_symmetry_500hz(report=True),
+        ], p,
+    )
+
+    # --- IEC 61260-1 §5.6 Band edges ---
+    edge_test = TestOctaveBandEdges()
+    _print_filter_section(
+        "IEC 61260-1 §5.6 Octave band edges (class 1, worst per band)",
+        [edge_test.test_lower_band_edge(i, report=True) for i in range(8)]
+        + [edge_test.test_upper_band_edge(i, report=True) for i in range(8)], p,
+    )
+
     # --- IEC 61260-1 §5.10 Pass-band ---
     pb_test = TestOctaveRelativeAttenuation()
     _print_filter_section(
@@ -281,6 +368,32 @@ def main(precision: int = 3) -> None:
     _print_bw_section(
         "IEC 61260-1 §5.12 Effective bandwidth deviation DB (class 1)",
         [bw_test.test_bandwidth_deviation(i, report=True) for i in range(8)], p,
+    )
+
+    # --- IEC 61260-1 §5.13 Level linearity ---
+    lin260_test = TestLinearOperatingRange()
+    lin260_rows = [
+        row
+        for i in range(len(_LIN_CENTERS))
+        for row in lin260_test.test_level_linearity(i, report=True)
+    ]
+    _print_filter_section(
+        "IEC 61260-1 §5.13 Octave level linearity (class 1, worst per band)",
+        lin260_rows, p,
+    )
+
+    # --- IEC 61260-1 §5.14 Time-invariant operation ---
+    ti_test = TestTimeInvariantOperation()
+    _print_filter_section(
+        "IEC 61260-1 §5.14 Octave time-invariant operation (class 1)",
+        [ti_test.test_time_invariant(i, report=True) for i in range(len(_TI_CENTERS))], p,
+    )
+
+    # --- IEC 61260-1 §5.16 Summation of output signals ---
+    sum_test = TestSummationOfOutputSignals()
+    _print_filter_section(
+        "IEC 61260-1 §5.16 Octave summation (class 1, worst per band pair)",
+        [sum_test.test_summation(row, report=True) for row in _SUMMATION_PARAMS], p,
     )
 
     print()

@@ -167,13 +167,16 @@ class TestLevelLinearityIncremental:
 class TestLinearRangeWidth:
     """IEC 61672-1 §5.6 — linear operating range ≥ 60 dB at 1 kHz."""
 
-    def test_linear_range_at_least_60dB(self):
+    def test_linear_range_at_least_60dB(self, report: bool = False):
         l_in, l_meas = _get_sweep()
         slope, intercept = np.polyfit(l_in, l_meas, 1)
         residuals = np.abs(l_meas - (slope * l_in + intercept))
 
         in_range = l_in[residuals <= 0.8]
         range_db = float(in_range[-1] - in_range[0]) if len(in_range) >= 2 else 0.0
+        if report:
+            return {"label": "linear range", "deviation": range_db,
+                    "limit_lo": 60.0, "limit_hi": None, "margin": range_db - 60.0}
         assert range_db >= 60.0, (
             f"Linear operating range = {range_db:.1f} dB (minimum: 60 dB)"
         )

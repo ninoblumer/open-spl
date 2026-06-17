@@ -186,32 +186,54 @@ class TestZWeightingFlat:
 class TestNormalisationAt1kHz:
     """IEC 61672-1 §5.5 — all three weightings are normalised to 0 dB at 1 kHz."""
 
-    def test_a_weighting(self):
+    @staticmethod
+    def _report(label: str, gain: float) -> dict:
+        return {"label": label, "deviation": gain, "limit_lo": -0.05, "limit_hi": 0.05,
+                "margin": min(gain + 0.05, 0.05 - gain)}
+
+    def test_a_weighting(self, report: bool = False):
         gain = _measure_gain_db(PluginAWeighting, 1000)
+        if report:
+            return self._report("A @ 1 kHz", gain)
         assert abs(gain) <= 0.05, f"A @ 1 kHz: gain={gain:.4f} dB"
 
-    def test_c_weighting(self):
+    def test_c_weighting(self, report: bool = False):
         gain = _measure_gain_db(PluginCWeighting, 1000)
+        if report:
+            return self._report("C @ 1 kHz", gain)
         assert abs(gain) <= 0.05, f"C @ 1 kHz: gain={gain:.4f} dB"
 
-    def test_z_weighting(self):
+    def test_z_weighting(self, report: bool = False):
         gain = _measure_gain_db(PluginZWeighting, 1000)
+        if report:
+            return self._report("Z @ 1 kHz", gain)
         assert abs(gain) <= 0.05, f"Z @ 1 kHz: gain={gain:.4f} dB"
 
 
 class TestWeightingDifferencesAt1kHz:
     """IEC 61672-1 §5.5.9 — C, A, Z agree within 0.2 dB at 1 kHz."""
 
-    def test_c_minus_a(self):
+    @staticmethod
+    def _report(label: str, diff: float) -> dict:
+        return {"label": label, "deviation": diff, "limit_lo": -0.2, "limit_hi": 0.2,
+                "margin": min(diff + 0.2, 0.2 - diff)}
+
+    def test_c_minus_a(self, report: bool = False):
         gain_a = _measure_gain_db(PluginAWeighting, 1000)
         gain_c = _measure_gain_db(PluginCWeighting, 1000)
-        assert abs(gain_c - gain_a) <= 0.2, (
-            f"|L_C − L_A| = {abs(gain_c - gain_a):.4f} dB at 1 kHz (limit: 0.2 dB)"
+        diff = gain_c - gain_a
+        if report:
+            return self._report("L_C - L_A", diff)
+        assert abs(diff) <= 0.2, (
+            f"|L_C − L_A| = {abs(diff):.4f} dB at 1 kHz (limit: 0.2 dB)"
         )
 
-    def test_z_minus_a(self):
+    def test_z_minus_a(self, report: bool = False):
         gain_a = _measure_gain_db(PluginAWeighting, 1000)
         gain_z = _measure_gain_db(PluginZWeighting, 1000)
-        assert abs(gain_z - gain_a) <= 0.2, (
-            f"|L_Z − L_A| = {abs(gain_z - gain_a):.4f} dB at 1 kHz (limit: 0.2 dB)"
+        diff = gain_z - gain_a
+        if report:
+            return self._report("L_Z - L_A", diff)
+        assert abs(diff) <= 0.2, (
+            f"|L_Z − L_A| = {abs(diff):.4f} dB at 1 kHz (limit: 0.2 dB)"
         )

@@ -137,7 +137,7 @@ class TestFvsSteadyState:
     the time-averaged (Leq) indications must each agree with the F time-weighted
     indication within ±0.1 dB."""
 
-    def test_steady_1khz(self):
+    def test_steady_1khz(self, report: bool = False):
         samplerate = 48000
         blocksize  = 4096
         freq_hz    = 1000
@@ -161,16 +161,24 @@ class TestFvsSteadyState:
         y_s = float(np.mean(plugin_s.output[0, :]))
 
         diff_fs = abs(10.0 * np.log10(y_f / y_s))
-        assert diff_fs <= 0.1, (
-            f"|L_F − L_S| = {diff_fs:.4f} dB at 1 kHz (class 1 limit: 0.1 dB)"
-        )
 
         # L_Aeq vs L_F as a direct ratio: y_f is the F time-weighted mean square
         # (Pa²) and the Leq accumulator's read_lin is also mean square (Pa²), so
         # the reference pressure cancels.
         leq_meansq = float(plugin_z.read_lin("leq")[0])
-
         diff_eq = abs(10.0 * np.log10(leq_meansq / y_f))
+
+        if report:
+            return [
+                {"label": "|L_F - L_S|", "deviation": diff_fs,
+                 "limit_lo": -0.1, "limit_hi": 0.1, "margin": 0.1 - diff_fs},
+                {"label": "|L_Aeq - L_F|", "deviation": diff_eq,
+                 "limit_lo": -0.1, "limit_hi": 0.1, "margin": 0.1 - diff_eq},
+            ]
+
+        assert diff_fs <= 0.1, (
+            f"|L_F − L_S| = {diff_fs:.4f} dB at 1 kHz (class 1 limit: 0.1 dB)"
+        )
         assert diff_eq <= 0.1, (
             f"|L_Aeq − L_F| = {diff_eq:.4f} dB at 1 kHz (class 1 limit: 0.1 dB)"
         )

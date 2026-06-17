@@ -241,26 +241,32 @@ class TestOctaveBandEdges:
     """
 
     @pytest.mark.parametrize("band_idx", range(8), ids=_BAND_IDS)
-    def test_lower_band_edge(self, band_idx: int):
+    def test_lower_band_edge(self, band_idx: int, report: bool = False):
         centers, sos_list = _get_filterbank()
         f_m    = centers[band_idx]
         f_low  = f_m * G ** (-0.5)
         if f_low < 0.5:
             pytest.skip("Lower band edge below 0.5 Hz")
         da = _delta_A(sos_list[band_idx], f_m, -0.5, SAMPLERATE)
+        if report:
+            return {"label": f"{int(round(f_m))} Hz lower edge", "deviation": da,
+                    "limit_lo": 1.2, "limit_hi": 5.3, "margin": min(da - 1.2, 5.3 - da)}
         assert 1.2 <= da <= 5.3, (
             f"Band {f_m:.1f} Hz lower edge @ {f_low:.1f} Hz: "
             f"ΔA = {da:.3f} dB (class 1 at band edge: [1.2, 5.3] dB)"
         )
 
     @pytest.mark.parametrize("band_idx", range(8), ids=_BAND_IDS)
-    def test_upper_band_edge(self, band_idx: int):
+    def test_upper_band_edge(self, band_idx: int, report: bool = False):
         centers, sos_list = _get_filterbank()
         f_m    = centers[band_idx]
         f_high = f_m * G ** (+0.5)
         if f_high >= SAMPLERATE / 2:
             pytest.skip("Upper band edge above Nyquist")
         da = _delta_A(sos_list[band_idx], f_m, +0.5, SAMPLERATE)
+        if report:
+            return {"label": f"{int(round(f_m))} Hz upper edge", "deviation": da,
+                    "limit_lo": 1.2, "limit_hi": 5.3, "margin": min(da - 1.2, 5.3 - da)}
         assert 1.2 <= da <= 5.3, (
             f"Band {f_m:.1f} Hz upper edge @ {f_high:.1f} Hz: "
             f"ΔA = {da:.3f} dB (class 1 at band edge: [1.2, 5.3] dB)"
