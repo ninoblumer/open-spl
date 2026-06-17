@@ -17,6 +17,8 @@ import numpy as np
 import pytest
 
 from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
+from slm.frequency_weighting import PluginZWeighting
+from slm.meter import LeqAccumulator
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +133,9 @@ class TestSlowTimeWeightingDecayRate:
 
 
 class TestFvsSteadyState:
-    """IEC 61672-1 §5.8.3 — F and S outputs agree ≤ 0.1 dB for steady 1 kHz."""
+    """IEC 61672-1 §5.8.3 — for a steady 1 kHz signal, the S time-weighted and
+    the time-averaged (Leq) indications must each agree with the F time-weighted
+    indication within ±0.1 dB."""
 
     def test_steady_1khz(self):
         samplerate = 48000
@@ -144,15 +148,29 @@ class TestFvsSteadyState:
         bus      = _mock_bus(samplerate=samplerate, blocksize=blocksize)
         plugin_f = PluginFastTimeWeighting(input=bus)
         plugin_s = PluginSlowTimeWeighting(input=bus)
+        # Pure passthrough (Z) carrying a linear-Leq accumulator for L_Aeq.
+        plugin_z = PluginZWeighting(input=bus)
+        plugin_z.create_meter(LeqAccumulator, name="leq")
 
         _process_steady(plugin_f, freq_hz, n_blocks, samplerate, blocksize)
         _process_steady(plugin_s, freq_hz, n_blocks, samplerate, blocksize)
+        _process_steady(plugin_z, freq_hz, n_blocks, samplerate, blocksize)
 
         # Average the last block to suppress any residual high-frequency ripple.
         y_f = float(np.mean(plugin_f.output[0, :]))
         y_s = float(np.mean(plugin_s.output[0, :]))
 
-        diff_db = abs(10.0 * np.log10(y_f / y_s))
-        assert diff_db <= 0.1, (
-            f"|L_F − L_S| = {diff_db:.4f} dB at 1 kHz (class 1 limit: 0.1 dB)"
+        diff_fs = abs(10.0 * np.log10(y_f / y_s))
+        assert diff_fs <= 0.1, (
+            f"|L_F − L_S| = {diff_fs:.4f} dB at 1 kHz (class 1 limit: 0.1 dB)"
+        )
+
+        # L_Aeq vs L_F as a direct ratio: y_f is the F time-weighted mean square
+        # (Pa²) and the Leq accumulator's read_lin is also mean square (Pa²), so
+        # the reference pressure cancels.
+        leq_meansq = float(plugin_z.read_lin("leq")[0])
+
+        diff_eq = abs(10.0 * np.log10(leq_meansq / y_f))
+        assert diff_eq <= 0.1, (
+            f"|L_Aeq − L_F| = {diff_eq:.4f} dB at 1 kHz (class 1 limit: 0.1 dB)"
         )
