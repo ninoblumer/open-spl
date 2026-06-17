@@ -22,7 +22,7 @@ from tests.iec61672.test_61672_time_weightings import (
     TestFastTimeWeightingDecayRate, TestSlowTimeWeightingDecayRate,
 )
 from tests.iec61672.test_61672_toneburst import (
-    TestFmaxToneburst, TestSELToneburst, _TABLE4,
+    TestFmaxToneburst, TestSELToneburst, TestSmaxToneburst, _TABLE4, _TABLE4_SMAX,
 )
 from tests.iec61672.test_61672_cpeak import TestCWeightedPeak, _TABLE5
 from tests.iec61672.test_61672_level_linearity import (
@@ -227,6 +227,12 @@ def main() -> None:
     _print_weighting_section(
         "IEC 61672-1 §5.9 F-max toneburst (class 1)",
         [fmax_test.test_fmax_vs_table4(row, report=True) for row in _TABLE4],
+    )
+
+    smax_test = TestSmaxToneburst()
+    _print_weighting_section(
+        "IEC 61672-1 §5.9 S-max toneburst (class 1)",
+        [smax_test.test_smax_vs_table4(row, report=True) for row in _TABLE4_SMAX],
     )
 
     sel_test = TestSELToneburst()
