@@ -45,7 +45,7 @@ from test_61260_1_filters import (
     G as G_IEC, SAMPLERATE,
 )
 from test_61672_time_weightings import _mock_bus, _process_steady
-from test_61672_toneburst import _toneburst_response, _TABLE4
+from test_61672_toneburst import _toneburst_response, _TABLE4, _TABLE4_SMAX
 from test_61672_level_linearity import _get_sweep
 from test_xl2_broadband import (
     compute_leq, compute_lmax, compute_lpeak,
@@ -578,32 +578,44 @@ def make_fig_4_4():
     cl1_lo     = np.array([r[3] for r in _TABLE4])
     cl1_hi     = np.array([r[4] for r in _TABLE4])
 
+    # S-max sub-block of Table 4 (Eq. 7, τ = 1 s) — own durations and limits.
+    burst_ms_s = np.array([r[0] for r in _TABLE4_SMAX])
+    ref_smax   = np.array([r[1] for r in _TABLE4_SMAX])
+    cl1_lo_s   = np.array([r[2] for r in _TABLE4_SMAX])
+    cl1_hi_s   = np.array([r[3] for r in _TABLE4_SMAX])
+
     print(f"  computing toneburst response for {len(_TABLE4)} burst lengths…")
     results   = [_toneburst_response(ms / 1000.0) for ms in burst_ms]
     meas_fmax = np.array([r[0] for r in results])
     meas_sel  = np.array([r[1] for r in results])
+    smax_by_ms = {ms: r[2] for ms, r in zip(burst_ms, results)}
+    meas_smax = np.array([smax_by_ms[ms] for ms in burst_ms_s])
     dev_fmax  = meas_fmax - ref_fmax
     dev_sel   = meas_sel  - ref_sel
+    dev_smax  = meas_smax - ref_smax
 
     # Dense reference curves
     t_dense        = np.geomspace(0.0001, 1.2, 500)
     ref_fmax_dense = 10 * np.log10(np.maximum(1 - np.exp(-t_dense / 0.125), 1e-30))
     ref_sel_dense  = 10 * np.log10(t_dense / 1.0)
+    ref_smax_dense = 10 * np.log10(np.maximum(1 - np.exp(-t_dense / 1.0), 1e-30))
 
     # Fixed x-ticks
     tick_ms  = [0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
     tick_lbl = ["0.25", "0.5", "1", "2", "5", "10", "20", "50",
                 "100", "200", "500", "1000"]
 
-    fig, (ax_f, ax_s) = plt.subplots(2, 1, sharex=True, figsize=(8, 7),
-                                      gridspec_kw={"hspace": 0.25})
+    fig, (ax_f, ax_smax, ax_sel) = plt.subplots(3, 1, sharex=True, figsize=(8, 9),
+                                                gridspec_kw={"hspace": 0.28})
 
-    def _burst_panel(ax, ref_vals, ref_dense, meas_vals, dev_vals, ylabel, title):
-        # Tolerance band — extend to x-axis limits so first/last band is uniform
-        bms_ext = np.concatenate([[1500.0],  burst_ms, [0.2]])
+    def _burst_panel(ax, bms, ref_vals, ref_dense, meas_vals, dev_vals,
+                     lo, hi, ylabel, title):
+        # Tolerance band — extend half a step past the end points (proportional
+        # to each panel's own duration range) so every band segment is uniform.
+        bms_ext = np.concatenate([[bms[0] * 1.5],  bms,       [bms[-1] * 0.8]])
         ref_ext = np.concatenate([[ref_vals[0]],  ref_vals, [ref_vals[-1]]])
-        lo_ext  = np.concatenate([[cl1_lo[0]],    cl1_lo,   [cl1_lo[-1]]])
-        hi_ext  = np.concatenate([[cl1_hi[0]],    cl1_hi,   [cl1_hi[-1]]])
+        lo_ext  = np.concatenate([[lo[0]],    lo,   [lo[-1]]])
+        hi_ext  = np.concatenate([[hi[0]],    hi,   [hi[-1]]])
         ax.fill_between(bms_ext, ref_ext + lo_ext, ref_ext + hi_ext,
                         step="mid", color=C_FILL, alpha=0.5,
                         label="Class 1 tolerance")
@@ -613,9 +625,9 @@ def make_fig_4_4():
                 label="IEC 61672-1 reference")
 
         # Measured values
-        in_tol = (dev_vals >= cl1_lo) & (dev_vals <= cl1_hi)
+        in_tol = (dev_vals >= lo) & (dev_vals <= hi)
         colors = [C_BLUE if t else C_OUT for t in in_tol]
-        ax.scatter(burst_ms, meas_vals, c=colors, s=30, zorder=5, label="Measured")
+        ax.scatter(bms, meas_vals, c=colors, s=30, zorder=5, label="Measured")
 
         ax.axhline(0, color="black", lw=0.8)
         ax.set_xscale("log")
@@ -625,14 +637,20 @@ def make_fig_4_4():
         ax.set_ylabel(ylabel)
         ax.set_title(title, fontsize=9)
 
-    _burst_panel(ax_f, ref_fmax, ref_fmax_dense, meas_fmax, dev_fmax,
+    _burst_panel(ax_f, burst_ms, ref_fmax, ref_fmax_dense, meas_fmax, dev_fmax,
+                 cl1_lo, cl1_hi,
                  r"$\delta_{F_\mathrm{max}}$ (dB)", "4 kHz tone burst, F time weighting")
-    _burst_panel(ax_s, ref_sel, ref_sel_dense, meas_sel, dev_sel,
-                 r"$\delta_\mathrm{SEL}$ (dB)", "SEL response")
+    _burst_panel(ax_smax, burst_ms_s, ref_smax, ref_smax_dense, meas_smax, dev_smax,
+                 cl1_lo_s, cl1_hi_s,
+                 r"$\delta_{S_\mathrm{max}}$ (dB)", "4 kHz tone burst, S time weighting")
+    _burst_panel(ax_sel, burst_ms, ref_sel, ref_sel_dense, meas_sel, dev_sel,
+                 cl1_lo, cl1_hi,
+                 r"$\delta_\mathrm{SEL}$ (dB)", "4 kHz tone burst, SEL response")
 
     ax_f.set_ylim(-40, 3)
-    ax_s.set_ylim(-40, 3)
-    ax_s.set_xlabel("Burst duration (ms)")
+    ax_smax.set_ylim(-40, 3)
+    ax_sel.set_ylim(-40, 3)
+    ax_sel.set_xlabel("Burst duration (ms)")
     ax_f.legend(loc="lower right", fontsize=8)
     fig.suptitle("IEC 61672-1:2013 §5.9 Table 4 — Toneburst Response (Class 1)")
 
@@ -802,7 +820,7 @@ def make_fig_4_6():
     g_lbls  = ["G⁻⁴", "G⁻³", "G⁻²", "G⁻¹", "1", "G¹", "G²", "G³", "G⁴"]
     ax_b.xaxis.set_major_locator(ticker.FixedLocator(g_ticks))
     ax_b.xaxis.set_major_formatter(ticker.FixedFormatter(g_lbls))
-    ax_b.set_xlabel("$\Omega = f / f_m$")
+    ax_b.set_xlabel(r"$\Omega = f / f_m$")
     ax_b.set_ylabel("ΔA (dB)")
     ax_b.set_title("Full range", fontsize=9)
     ax_b.legend(fontsize=8, loc="lower right")   # lower right = visual top-right after inversion
@@ -848,7 +866,7 @@ def make_fig_4_6b():
         ax.xaxis.set_major_locator(ticker.FixedLocator(ticks))
         ax.xaxis.set_major_formatter(ticker.FixedFormatter(lbls))
         ax.xaxis.set_minor_locator(ticker.NullLocator())
-        ax.set_xlabel("$\Omega = f / f_m$", fontsize=8)
+        ax.set_xlabel(r"$\Omega = f / f_m$", fontsize=8)
         ax.axvline(1.0,           color="black", lw=0.6, ls=":")
         ax.axvline(G_IEC**( 0.5), color="grey",  lw=0.6, ls=":")
         ax.axvline(G_IEC**(-0.5), color="grey",  lw=0.6, ls=":")
