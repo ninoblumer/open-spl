@@ -46,6 +46,7 @@ from test_61260_1_filters import (
 )
 from test_61672_time_weightings import _mock_bus, _process_steady
 from test_61672_toneburst import _toneburst_response, _TABLE4, _TABLE4_SMAX
+from test_61672_cpeak import _cpeak_minus_lc, _TABLE5
 from test_61672_level_linearity import _get_sweep
 from test_xl2_broadband import (
     compute_leq, compute_lmax, compute_lpeak,
@@ -808,6 +809,62 @@ def make_fig_4_5():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# FIG 4.5b — C-weighted Peak Sound Level vs IEC 61672-1:2013 Table 5
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def make_fig_4_5b():
+    import matplotlib.patches as mpatches
+
+    print(f"  computing C-peak response for {len(_TABLE5)} Table 5 signals…")
+    cyc_lbl = {"1cycle": "1 cycle", "pos_half": "+½ cycle", "neg_half": "−½ cycle"}
+    f_lbl   = lambda f: "8 kHz" if f >= 1000 else f"{f:g} Hz"
+
+    labels, refs, los, his, meas = [], [], [], [], []
+    for sig_type, freq, ref, lo, hi in _TABLE5:
+        labels.append(f"{cyc_lbl[sig_type]}\n{f_lbl(freq)}")
+        refs.append(ref)
+        los.append(lo)
+        his.append(hi)
+        meas.append(_cpeak_minus_lc(freq, sig_type))
+
+    refs = np.array(refs); los = np.array(los); his = np.array(his); meas = np.array(meas)
+    devs   = meas - refs
+    in_tol = (devs >= los) & (devs <= his)
+
+    x = np.arange(len(_TABLE5))
+    w = 0.6
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Acceptance band (reference ± class 1 limit) and Table 5 reference per signal.
+    for xi, ref, lo, hi in zip(x, refs, los, his):
+        ax.add_patch(mpatches.Rectangle((xi - w / 2, ref + lo), w, hi - lo,
+                                        color=C_FILL, alpha=0.7, zorder=1))
+        ax.plot([xi - w / 2, xi + w / 2], [ref, ref],
+                color=C_GREY, lw=1.5, ls="--", zorder=2)
+
+    colors = [C_BLUE if t else C_OUT for t in in_tol]
+    ax.scatter(x, meas, c=colors, s=55, zorder=5)
+
+    band_proxy = mpatches.Patch(color=C_FILL, alpha=0.7, label="Class 1 acceptance limits")
+    ref_proxy  = plt.Line2D([0], [0], color=C_GREY, lw=1.5, ls="--",
+                            label="Table 5 reference")
+    meas_proxy = plt.Line2D([0], [0], marker="o", color=C_BLUE, lw=0,
+                            label=r"Measured $L_{C\mathrm{peak}} - L_C$")
+    ax.legend(handles=[band_proxy, ref_proxy, meas_proxy], fontsize=8, loc="upper right")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=8)
+    ax.set_xlim(-0.6, len(_TABLE5) - 0.4)
+    ax.set_ylim(0, 6)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1.0))
+    ax.set_ylabel(r"$L_{C\mathrm{peak}} - L_C$ (dB)")
+    ax.set_title("IEC 61672-1:2013 §5.13 Table 5 — C-weighted Peak Sound Level (Class 1)")
+
+    fig.tight_layout()
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # FIG 4.6 — Octave Band Filter Transfer Function with IEC 61260-1 Acceptance-limit Mask
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1394,6 +1451,7 @@ if __name__ == "__main__":
         (make_fig_4_4, "fig_4_4_toneburst_response"),
         (make_fig_4_4b, "fig_4_4b_toneburst_response_deviation"),
         (make_fig_4_5, "fig_4_5_level_linearity"),
+        (make_fig_4_5b, "fig_4_5b_cpeak"),
         (make_fig_4_6, "fig_4_6_octave_filter_mask"),
         (make_fig_4_6b, "fig_4_6b_octave_filter_phase_groupdelay"),
         (make_fig_4_6c, "fig_4_6c_octave_summation"),
