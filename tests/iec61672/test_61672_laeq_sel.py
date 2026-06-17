@@ -28,6 +28,9 @@ p0        = REFERENCE_PRESSURE   # 20 µPa
 T0        = 1.0                  # SEL reference duration (s)
 SAMPLERATE = 48_000
 BLOCKSIZE  = 4_096
+# Divisor of the 1 s @ 48 kHz repeated-toneburst window (48000 = 10 × 4800), so
+# the §5.10 averaging window is exactly T_m = 1 s with no block-size rounding.
+WINDOW_BLOCKSIZE = 4_800
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +76,24 @@ def _measure(signal: np.ndarray) -> tuple[float, float, int]:
     l_aeq = float(plugin.read_db("leq")[0])
     l_ae  = float(plugin.read_db("le")[0])
     return l_aeq, l_ae, len(signal)
+
+
+def _measure_leq_window(signal: np.ndarray) -> float:
+    """A-weighted L_Aeq of *signal*, integrated over its exact length.
+
+    Processes the signal in WINDOW_BLOCKSIZE-sample blocks (a divisor of the
+    1 s @ 48 kHz window), so the averaging window equals len(signal)/SAMPLERATE
+    exactly with no rounding to a multiple of BLOCKSIZE.
+    """
+    assert len(signal) % WINDOW_BLOCKSIZE == 0, (
+        "signal length must be a multiple of WINDOW_BLOCKSIZE"
+    )
+    bus    = _mock_bus(blocksize=WINDOW_BLOCKSIZE)
+    plugin = PluginAWeighting(input=bus)
+    plugin.create_meter(LeqAccumulator, name="leq")
+    for start in range(0, len(signal), WINDOW_BLOCKSIZE):
+        plugin.process(signal[start : start + WINDOW_BLOCKSIZE][np.newaxis, :])
+    return float(plugin.read_db("leq")[0])
 
 
 # ---------------------------------------------------------------------------
@@ -180,26 +201,43 @@ class TestSELFormula:
 # §5.10 — Repeated tonebursts
 # ---------------------------------------------------------------------------
 
-# Table 4 SEL acceptance limits for effective on-time n·T_b:
-# (effective_ms, delta_SEL_ref, cl1_lo, cl1_hi)
+# IEC 61672-1:2013 Table 4 — SEL toneburst response references and class 1
+# acceptance limits, keyed by the effective on-time n·T_b of the burst sequence.
+# (effective_ms: (delta_SEL_ref, cl1_lo, cl1_hi))
+# The 1000 ms row is the steady-signal limit (n·T_b = T_m); it is exercised by
+# the single-burst SEL case in test_61672_toneburst.py, not as a repeated
+# sequence (two non-overlapping bursts cannot sum to a full window).
 _TABLE4_SEL = {
-    1000: ( 0.0, -0.5, +0.5),
-     500: (-3.0, -0.5, +0.5),
-     200: (-7.0, -0.5, +0.5),
+    1000: (  0.0, -0.5, +0.5),
+     500: ( -3.0, -0.5, +0.5),
+     200: ( -7.0, -0.5, +0.5),
      100: (-10.0, -1.0, +1.0),
       50: (-13.0, -1.0, +1.0),
       20: (-17.0, -1.0, +1.0),
       10: (-20.0, -1.0, +1.0),
+       5: (-23.0, -1.0, +1.0),
+       2: (-27.0, -1.5, +1.0),
+       1: (-30.0, -2.0, +1.0),
+     0.5: (-33.0, -2.5, +1.0),
+    0.25: (-36.0, -3.0, +1.0),
 }
 
-# (n_bursts, T_b_ms, T_m_s, effective_ms)
+# (n_bursts, T_b_ms, T_m_s, effective_ms) — sweep every Table 4 SEL row from
+# 500 ms down to 0.25 ms.  Each T_b is a whole number of 4 kHz periods at
+# 48 kHz (so ∑sin² is exact); 0.25 ms is one period (the minimum duration in
+# §5.10.2) and can only be reached with a single burst.
 _REPEATED = [
-    (5,  100, 1.0,  500),
-    (5,   40, 1.0,  200),
-    (10,  10, 1.0,  100),
-    (10,   5, 1.0,   50),
-    (20,   1, 1.0,   20),
-    (10,   1, 1.0,   10),
+    (5,  100,   1.0,  500),
+    (5,   40,   1.0,  200),
+    (10,  10,   1.0,  100),
+    (10,   5,   1.0,   50),
+    (20,   1,   1.0,   20),
+    (10,   1,   1.0,   10),
+    (5,    1,   1.0,    5),
+    (2,    1,   1.0,    2),
+    (2,    0.5, 1.0,    1),
+    (2,    0.25, 1.0,   0.5),
+    (1,    0.25, 1.0,   0.25),
 ]
 _REPEATED_IDS = [f"n={r[0]}_Tb={r[1]}ms" for r in _REPEATED]
 
@@ -215,7 +253,7 @@ def _repeated_burst_leq(n_bursts: int, T_b_ms: float, T_m_s: float) -> float:
 
     T_b_s  = T_b_ms / 1000.0
     n_b    = int(round(T_b_s * samplerate))       # samples per burst
-    n_m    = (int(T_m_s * samplerate) // BLOCKSIZE) * BLOCKSIZE  # trimmed window
+    n_m    = int(round(T_m_s * samplerate))       # exact window (T_m = 1 s)
 
     # Build signal: n bursts spread evenly across T_m, padded with silence.
     full = np.zeros(n_m)
@@ -226,8 +264,7 @@ def _repeated_burst_leq(n_bursts: int, T_b_ms: float, T_m_s: float) -> float:
         t_b   = np.arange(end - start) / samplerate
         full[start:end] = amplitude * np.sin(2.0 * np.pi * freq_hz * t_b)
 
-    l_aeq, _, _ = _measure(full)
-    return l_aeq
+    return _measure_leq_window(full)
 
 
 class TestRepeatedTonebursts:
@@ -241,12 +278,11 @@ class TestRepeatedTonebursts:
         n_bursts, T_b_ms, T_m_s, eff_ms = row
         ref_sel, cl1_lo, cl1_hi = _TABLE4_SEL[eff_ms]
 
-        # Steady-state A-weighted level at 1 kHz for unit sine ≈ A-wt at 4 kHz.
-        # Use analytic: L_A = 10·log₁₀(A²/2 / p₀²) + A_weighting_at_4kHz_dB.
-        # Since frequency weighting cancels in the difference, we measure L_A
-        # directly by running a full-window burst.
-        signal_ss = _trim(_make_sine(4000, 1.0, int(T_m_s * SAMPLERATE)))
-        l_a, _, _ = _measure(signal_ss)
+        # Steady-state A-weighted level of the corresponding 4 kHz sine, averaged
+        # over the same exact T_m window.  The frequency weighting cancels in the
+        # difference, so its absolute gain is irrelevant.
+        signal_ss = _make_sine(4000, 1.0, int(round(T_m_s * SAMPLERATE)))
+        l_a = _measure_leq_window(signal_ss)
 
         l_aeq = _repeated_burst_leq(n_bursts, T_b_ms, T_m_s)
         delta  = l_aeq - l_a
