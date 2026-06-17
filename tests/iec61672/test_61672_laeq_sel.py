@@ -3,15 +3,17 @@
 §3.9  L_Aeq,T = 10·log₁₀((1/T)·∫p_A²(t)dt / p₀²)
 §3.12 L_AE,T  = L_Aeq,T + 10·log₁₀(T/T₀)   T₀ = 1 s
 §5.10 For n equal-amplitude 4 kHz tonebursts of duration T_b in window T_m:
-        δ_ref = 10·log₁₀(n·T_b / T_m)
-      Deviations must meet Table 4 SEL acceptance limits for the effective
-      on-time n·T_b (class 1).
+        δ_ref = 10·log₁₀(n·T_b / T_m)                                  Eq. (9)
+      The reference response is computed from Eq. (9); the deviation must meet
+      the Table 4 SEL acceptance limit for the *individual* toneburst duration
+      T_b (§5.10.1, §5.10.2), not for the effective on-time n·T_b (class 1).
 
 Signal chain used here:  1 kHz / 4 kHz sine → PluginAWeighting → LeqAccumulator
                                                                  → LEAccumulator
 
-All signals are trimmed to an exact multiple of blocksize before processing so
-that no zero-padding enters the accumulator sample count.
+The §3.9/§3.12 signals are trimmed to a multiple of blocksize before processing;
+the §5.10 measurements use a block size that divides the exact 1 s window (see
+_measure_leq_window) so the averaging time equals T_m exactly.
 """
 from __future__ import annotations
 
@@ -201,43 +203,45 @@ class TestSELFormula:
 # §5.10 — Repeated tonebursts
 # ---------------------------------------------------------------------------
 
-# IEC 61672-1:2013 Table 4 — SEL toneburst response references and class 1
-# acceptance limits, keyed by the effective on-time n·T_b of the burst sequence.
-# (effective_ms: (delta_SEL_ref, cl1_lo, cl1_hi))
-# The 1000 ms row is the steady-signal limit (n·T_b = T_m); it is exercised by
-# the single-burst SEL case in test_61672_toneburst.py, not as a repeated
-# sequence (two non-overlapping bursts cannot sum to a full window).
-_TABLE4_SEL = {
-    1000: (  0.0, -0.5, +0.5),
-     500: ( -3.0, -0.5, +0.5),
-     200: ( -7.0, -0.5, +0.5),
-     100: (-10.0, -1.0, +1.0),
-      50: (-13.0, -1.0, +1.0),
-      20: (-17.0, -1.0, +1.0),
-      10: (-20.0, -1.0, +1.0),
-       5: (-23.0, -1.0, +1.0),
-       2: (-27.0, -1.5, +1.0),
-       1: (-30.0, -2.0, +1.0),
-     0.5: (-33.0, -2.5, +1.0),
-    0.25: (-36.0, -3.0, +1.0),
+# IEC 61672-1:2013 Table 4 — class 1 acceptance limits for the SEL toneburst
+# response, keyed by the *individual* toneburst duration T_b (§5.10.1 applies the
+# "applicable acceptance limits of Table 4 for the SEL toneburst response", and
+# §5.10.2 frames the relevant duration as the individual T_b).  The reference
+# response itself is not taken from this table; it is computed from Eq. (9).
+# (T_b_ms: (cl1_lo, cl1_hi))
+_TABLE4_SEL_LIMITS = {
+    1000: (-0.5, +0.5),
+     500: (-0.5, +0.5),
+     200: (-0.5, +0.5),
+     100: (-1.0, +1.0),
+      50: (-1.0, +1.0),
+      20: (-1.0, +1.0),
+      10: (-1.0, +1.0),
+       5: (-1.0, +1.0),
+       2: (-1.5, +1.0),
+       1: (-2.0, +1.0),
+     0.5: (-2.5, +1.0),
+    0.25: (-3.0, +1.0),
 }
 
-# (n_bursts, T_b_ms, T_m_s, effective_ms) — sweep every Table 4 SEL row from
-# 500 ms down to 0.25 ms.  Each T_b is a whole number of 4 kHz periods at
-# 48 kHz (so ∑sin² is exact); 0.25 ms is one period (the minimum duration in
-# §5.10.2) and can only be reached with a single burst.
+# (n_bursts, T_b_ms, T_m_s) — repeated 4 kHz toneburst sequences in a 1 s window.
+# Each T_b is a Table 4 duration (so its acceptance band is defined directly) and
+# a whole number of 4 kHz periods at 48 kHz (so ∑sin² is exact).  n ≥ 2 and
+# n·T_b < T_m so the bursts form a genuine sequence with gaps; the 1000 ms and
+# 500 ms rows are omitted because they cannot be repeated within 1 s (that steady
+# / single-burst regime is covered by the §5.9 SEL test).  0.25 ms is one period,
+# the minimum duration of §5.10.2.
 _REPEATED = [
-    (5,  100,   1.0,  500),
-    (5,   40,   1.0,  200),
-    (10,  10,   1.0,  100),
-    (10,   5,   1.0,   50),
-    (20,   1,   1.0,   20),
-    (10,   1,   1.0,   10),
-    (5,    1,   1.0,    5),
-    (2,    1,   1.0,    2),
-    (2,    0.5, 1.0,    1),
-    (2,    0.25, 1.0,   0.5),
-    (1,    0.25, 1.0,   0.25),
+    ( 2,  200,   1.0),
+    ( 3,  100,   1.0),
+    ( 5,   50,   1.0),
+    (10,   20,   1.0),
+    (10,   10,   1.0),
+    (10,    5,   1.0),
+    (10,    2,   1.0),
+    (10,    1,   1.0),
+    (10,    0.5, 1.0),
+    (10,    0.25, 1.0),
 ]
 _REPEATED_IDS = [f"n={r[0]}_Tb={r[1]}ms" for r in _REPEATED]
 
@@ -268,15 +272,20 @@ def _repeated_burst_leq(n_bursts: int, T_b_ms: float, T_m_s: float) -> float:
 
 
 class TestRepeatedTonebursts:
-    """IEC 61672-1 §5.10 — repeated toneburst formula, class 1.
+    """IEC 61672-1 §5.10 — response to repeated tonebursts, class 1.
 
-    δ_ref = 10·log₁₀(n·T_b / T_m); limits per Table 4 SEL column for n·T_b.
+    The reference response is δ_ref = 10·log₁₀(n·T_b / T_m) [Eq. (9)]; the
+    acceptance band is the Table 4 SEL limit for the individual toneburst
+    duration T_b (§5.10.1, §5.10.2).
     """
 
     @pytest.mark.parametrize("row", _REPEATED, ids=_REPEATED_IDS)
     def test_repeated_toneburst(self, row, report: bool = False):
-        n_bursts, T_b_ms, T_m_s, eff_ms = row
-        ref_sel, cl1_lo, cl1_hi = _TABLE4_SEL[eff_ms]
+        n_bursts, T_b_ms, T_m_s = row
+        cl1_lo, cl1_hi = _TABLE4_SEL_LIMITS[T_b_ms]
+
+        # Reference response of the sequence, Eq. (9): δ_ref = 10·log₁₀(n·T_b/T_m).
+        ref_sel = 10.0 * np.log10(n_bursts * (T_b_ms / 1000.0) / T_m_s)
 
         # Steady-state A-weighted level of the corresponding 4 kHz sine, averaged
         # over the same exact T_m window.  The frequency weighting cancels in the
@@ -294,6 +303,6 @@ class TestRepeatedTonebursts:
                     "limit_lo": cl1_lo, "limit_hi": cl1_hi, "margin": margin}
         assert cl1_lo <= dev <= cl1_hi, (
             f"n={n_bursts}, T_b={T_b_ms} ms, T_m={T_m_s} s: "
-            f"δ = {delta:.3f} dB, ref = {ref_sel:.1f} dB, "
+            f"δ = {delta:.3f} dB, ref = {ref_sel:.2f} dB, "
             f"dev = {dev:+.3f} dB (class 1: [{cl1_lo:+.1f}, {cl1_hi:+.1f}])"
         )
