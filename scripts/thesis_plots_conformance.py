@@ -40,8 +40,9 @@ from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
 # ── test-suite helpers ────────────────────────────────────────────────────────
 from test_61672_frequency_weightings import _measure_gain_db, _TABLE3
 from test_61260_1_filters import (
-    _get_filterbank, _gain_db,
+    _filterbank, _nominal_labels, _gain_db, _omega_for_bandwidth,
     _PASSBAND_CL1, _STOPBAND_CL1,
+    FilterConfig, OCTAVE, THIRD_OCTAVE,
     G as G_IEC, SAMPLERATE,
 )
 from test_61672_time_weightings import _mock_bus, _process_steady
@@ -62,6 +63,7 @@ from slm.octave_band import PluginOctaveBand
 # ── colors ────────────────────────────────────────────────────────────────────
 C_BLUE    = "#2166ac"
 C_RED     = "#d6604d"
+C_ORANGE  = "#ff7f0e"   # matplotlib default 2nd color (tab:orange)
 C_GREEN   = "#4dac26"
 C_GREY    = "#555555"
 C_FILL    = "#d4d4d4"
@@ -289,6 +291,9 @@ def make_fig_4_1():
     a_tol_lo = np.interp(log_f_d, log_f_tbl, a_goals + cl1_lo_fill)
     c_tol_hi = np.interp(log_f_d, log_f_tbl, c_goals + cl1_hi)
     c_tol_lo = np.interp(log_f_d, log_f_tbl, c_goals + cl1_lo_fill)
+    # Z-weighting shares the same Table 3 class-1 limits (design goal 0 dB).
+    z_tol_hi = np.interp(log_f_d, log_f_tbl, cl1_hi)
+    z_tol_lo = np.interp(log_f_d, log_f_tbl, cl1_lo_fill)
 
     fig, axes = plt.subplots(1, 3, figsize=(8, 3))
 
@@ -338,7 +343,11 @@ def make_fig_4_1():
     # ── Panel Z ──────────────────────────────────────────────────────────────
     ax = axes[2]
     YLIM_Z = (-0.15, 0.15)
-    ax.axhspan(-0.1, 0.1, color=C_FILL, alpha=0.5, label=LEG_TOL)
+    # Z shares the Table 3 class-1 limits (same column as A/C, goal 0 dB).  They
+    # are far wider than this y-zoom, so the band fills the panel — the measured
+    # Z response sits well within the limits.
+    ax.fill_between(freqs_dense, np.maximum(z_tol_lo, YLIM_Z[0]), z_tol_hi,
+                    color=C_FILL, alpha=0.5, label=LEG_TOL)
     ax.plot(freqs_tbl, z_meas,    "-",  color=C_GREEN, lw=1.5, label=LEG_48)
     ax.plot(freqs_tbl, z_meas_96, "--", color=C_GREEN, lw=1.5, label=LEG_96)
     ax.axhline(0, color="black", lw=0.6, ls=":")
@@ -868,24 +877,68 @@ def make_fig_4_5b():
 # FIG 4.6 — Octave Band Filter Transfer Function with IEC 61260-1 Acceptance-limit Mask
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _fmt_hz(f):
+    return f"{f / 1000:g} kHz" if f >= 1000 else f"{f:g} Hz"
+
+
+def _fmt_label(nominal: str) -> str:
+    """Render a bank nominal label ('8k', '1.25k', '500') as '8 kHz' / '500 Hz'."""
+    return f"{nominal[:-1]} kHz" if nominal.endswith("k") else f"{nominal} Hz"
+
+
 def make_fig_4_6():
-    # Use the 1000 Hz band (best-case for digital filter accuracy)
-    centers, sos_list = _get_filterbank()
-    band_idx = int(np.argmin([abs(c - 1000) for c in centers]))
-    sos = sos_list[band_idx]
-    f_m = centers[band_idx]
+    return _make_filter_mask_fig(1000)
 
+
+def make_fig_4_6d():
+    # 16 kHz is a standard centre for both bandwidths, but the default banks stop
+    # at 8 kHz (octave) / 10 kHz (1/3-octave); extend them so the 16 kHz band
+    # exists.  At 48 kHz this band sits close to Nyquist (24 kHz), so it shows the
+    # high-frequency limit of the digital filter design.
+    return _make_filter_mask_fig(
+        16000,
+        oct_cfg=FilterConfig(b=1, limits=(63, 16000)),
+        t3_cfg=FilterConfig(b=3, limits=(50, 16000)),
+    )
+
+
+def _make_filter_mask_fig(target_hz, oct_cfg=OCTAVE, t3_cfg=THIRD_OCTAVE):
+    # Compare the octave and one-third-octave filters nearest *target_hz* against
+    # the IEC 61260-1 acceptance mask.  Curves are plotted against the OCTAVE-band
+    # breakpoint coordinate x = G^e: for the octave filter x = Ω = f/f_m, while
+    # for the 1/3-octave filter the test frequency is the Formula (9)/(10) remap
+    # Ω = remap(G^e, b).  In this coordinate Table 1 and Table F.1 coincide, so a
+    # single mask applies to both bandwidths (cf. IEC 61260-1 Annex F).
+    def _band_near(cfg):
+        centers, sos_list = _filterbank(cfg)
+        nominal = _nominal_labels(cfg)
+        i = int(np.argmin([abs(c - target_hz) for c in centers]))
+        return sos_list[i], centers[i], nominal[i]
+
+    sos_oct, fm_oct, nom_oct = _band_near(oct_cfg)     # octave (1/1) bank
+    sos_t3,  fm_t3,  nom_t3  = _band_near(t3_cfg)       # one-third-octave bank
+
+    def atten_at(sos, fm, b, exp_range, n=2000):
+        """Relative attenuation vs octave-breakpoint coordinate x = G^e.
+
+        The actual test frequency is f = remap(G^e, b)·fm (identity for b=1).
+        Points above the Nyquist frequency are returned as NaN (not plotted).
+        """
+        e     = np.linspace(-exp_range, exp_range, n)
+        x     = G_IEC ** e                                 # display coordinate
+        omega = np.array([_omega_for_bandwidth(xi, b) for xi in x])
+        freqs = omega * fm
+        valid = freqs < SAMPLERATE / 2 * 0.999
+        g_ctr = _gain_db(sos, [fm], SAMPLERATE)[0]
+        da    = np.full_like(x, np.nan)
+        da[valid] = g_ctr - _gain_db(sos, freqs[valid], SAMPLERATE)
+        return x, da
+
+    omega_pb,    atten_pb    = atten_at(sos_oct, fm_oct, 1, 1.05)
+    omega_full,  atten_full  = atten_at(sos_oct, fm_oct, 1, 4.6)
+    omega_pb3,   atten_pb3   = atten_at(sos_t3,  fm_t3, t3_cfg.b, 1.05)
+    omega_full3, atten_full3 = atten_at(sos_t3,  fm_t3, t3_cfg.b, 4.6)
     log_G = np.log(G_IEC)
-    g_ctr = _gain_db(sos, [f_m], SAMPLERATE)[0]
-
-    def atten_at(exp_range):
-        f_lo = max(f_m * G_IEC**(-exp_range), 1.0)
-        f_hi = min(f_m * G_IEC**(+exp_range), SAMPLERATE / 2 * 0.999)
-        freqs = np.geomspace(f_lo, f_hi, 2000)
-        return freqs / f_m, g_ctr - _gain_db(sos, freqs, SAMPLERATE)
-
-    omega_pb,   atten_pb   = atten_at(1.05)
-    omega_full, atten_full = atten_at(4.6)
 
     # ── acceptance-limit mask with correct discontinuity at band edges ───
     # IEC 61260-1 §5.10.7: limits change discontinuously at band-edge G^{±0.5}.
@@ -937,10 +990,14 @@ def make_fig_4_6():
     fig, (ax_t, ax_b) = plt.subplots(2, 1, figsize=(8, 6),
                                       gridspec_kw={"hspace": 0.35})
 
+    LEG_OCT = f"Octave (1/1, {_fmt_label(nom_oct)})"
+    LEG_T3  = f"Third-octave (1/3, {_fmt_label(nom_t3)})"
+
     # ── TOP: passband zoom (G⁻¹ to G¹), y-axis inverted ─────────────────
     ax_t.fill_between(omega_m_pb, lo_pb, hi_pb,
                       color=C_FILL, alpha=0.8, label="Class 1 acceptance limits")
-    ax_t.plot(omega_pb, atten_pb, color=C_BLUE, lw=1.5, label="Implemented filter")
+    ax_t.plot(omega_pb,  atten_pb,  color=C_BLUE,   lw=1.5, label=LEG_OCT)
+    ax_t.plot(omega_pb3, atten_pb3, color=C_ORANGE, lw=1.5, label=LEG_T3)
     ax_t.axhline(0, color="black", lw=0.8)
     ax_t.axvline(1.0,           color="black", lw=0.6, ls=":")
     ax_t.axvline(G_IEC**( 0.5), color="grey",  lw=0.6, ls=":")
@@ -958,8 +1015,8 @@ def make_fig_4_6():
     # ── BOTTOM: full range (G⁻⁴ to G⁴), y-axis inverted ─────────────────
     ax_b.fill_between(omega_m_full, lo_full, hi_full,
                       color=C_FILL, alpha=0.8, label="Class 1 acceptance limits")
-    ax_b.plot(omega_full, atten_full,
-              color=C_BLUE, lw=1.5, label="Implemented filter")
+    ax_b.plot(omega_full,  atten_full,  color=C_BLUE,   lw=1.5, label=LEG_OCT)
+    ax_b.plot(omega_full3, atten_full3, color=C_ORANGE, lw=1.5, label=LEG_T3)
     ax_b.axhline(0, color="black", lw=0.8)
     ax_b.axvline(1.0,           color="black", lw=0.6, ls=":")
     ax_b.axvline(G_IEC**( 0.5), color="grey",  lw=0.6, ls=":")
@@ -978,8 +1035,8 @@ def make_fig_4_6():
     ax_b.legend(fontsize=8, loc="lower right")   # lower right = visual top-right after inversion
 
     fig.suptitle(
-        f"IEC 61260-1:2014 §5.10 — Octave-Band Filter "
-        f"($f_m$ = {int(round(f_m))} Hz, Class 1)", fontsize=10)
+        f"IEC 61260-1:2014 §5.10 — Octave & Third-Octave Filters "
+        f"($f_m$ = {_fmt_hz(target_hz)}, Class 1)", fontsize=10)
     fig.tight_layout()
     return fig
 
@@ -989,73 +1046,65 @@ def make_fig_4_6():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def make_fig_4_6b():
-    centers, sos_list = _get_filterbank()
-    band_idx = int(np.argmin([abs(c - 1000) for c in centers]))
-    sos = sos_list[band_idx]
-    f_m = centers[band_idx]
+    # Compare the octave-band and one-third-octave-band filters, both centred at
+    # 1 kHz.  A single Ω range (G⁻² … G²) is shown — the response is smooth, so a
+    # separate passband zoom adds nothing.
+    def _band_at_1k(cfg=None):
+        centers, sos_list = _filterbank() if cfg is None else _filterbank(cfg)
+        i = int(np.argmin([abs(c - 1000) for c in centers]))
+        return sos_list[i], centers[i]
 
-    def _phase_and_gd(freqs_hz):
-        freqs_hz = np.clip(freqs_hz, 1.0, SAMPLERATE / 2 * 0.999)
+    sos_oct, f_m = _band_at_1k()                 # octave (1/1) bank, 1 kHz band
+    sos_t3,  _   = _band_at_1k(THIRD_OCTAVE)     # one-third-octave bank, 1 kHz band
+
+    def _phase_and_gd(sos):
+        freqs_hz = np.clip(np.geomspace(f_m * G_IEC**(-2), f_m * G_IEC**(2), 2000),
+                           1.0, SAMPLERATE / 2 * 0.999)
         _, h = sig.sosfreqz(sos, worN=freqs_hz, fs=SAMPLERATE)
         phase   = np.unwrap(np.angle(h))
         w       = 2.0 * np.pi * freqs_hz / SAMPLERATE   # rad/sample
         gd_samp = -np.gradient(phase, w)                 # samples
         return freqs_hz / f_m, phase * 180.0 / np.pi, gd_samp / SAMPLERATE * 1000.0
 
-    omega_pb,   phase_pb,   gd_pb   = _phase_and_gd(
-        np.geomspace(f_m * G_IEC**(-1.05), f_m * G_IEC**(1.05), 2000))
-    omega_full, phase_full, gd_full = _phase_and_gd(
-        np.geomspace(f_m * G_IEC**(-4.6),  f_m * G_IEC**(4.6),  4000))
+    omega, phase_oct, gd_oct = _phase_and_gd(sos_oct)
+    _,     phase_t3,  gd_t3  = _phase_and_gd(sos_t3)
 
-    g_ticks_pb   = [G_IEC**k for k in range(-1, 2)]
-    g_lbls_pb    = ["G⁻¹", "1", "G¹"]
-    g_ticks_full = [G_IEC**k for k in range(-4, 5)]
-    g_lbls_full  = ["G⁻⁴", "G⁻³", "G⁻²", "G⁻¹", "1", "G¹", "G²", "G³", "G⁴"]
+    g_ticks = [G_IEC**k for k in range(-2, 3)]
+    g_lbls  = ["G⁻²", "G⁻¹", "1", "G¹", "G²"]
 
-    def _setup(ax, ticks, lbls, xlim):
+    def _setup(ax):
         ax.set_xscale("log")
-        ax.set_xlim(*xlim)
-        ax.xaxis.set_major_locator(ticker.FixedLocator(ticks))
-        ax.xaxis.set_major_formatter(ticker.FixedFormatter(lbls))
+        ax.set_xlim(G_IEC**(-2), G_IEC**(2))
+        ax.xaxis.set_major_locator(ticker.FixedLocator(g_ticks))
+        ax.xaxis.set_major_formatter(ticker.FixedFormatter(g_lbls))
         ax.xaxis.set_minor_locator(ticker.NullLocator())
         ax.set_xlabel(r"$\Omega = f / f_m$", fontsize=8)
-        ax.axvline(1.0,           color="black", lw=0.6, ls=":")
-        ax.axvline(G_IEC**( 0.5), color="grey",  lw=0.6, ls=":")
-        ax.axvline(G_IEC**(-0.5), color="grey",  lw=0.6, ls=":")
+        ax.axvline(1.0, color="black", lw=0.6, ls=":")
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 6),
-                             gridspec_kw={"hspace": 0.42, "wspace": 0.35})
+    LEG_OCT = "Octave (1/1)"
+    LEG_T3  = "Third-octave (1/3)"
 
-    # ── Phase passband ────────────────────────────────────────────────────────
-    ax = axes[0, 0]
-    ax.plot(omega_pb, phase_pb, color=C_BLUE, lw=1.5)
-    ax.set_ylabel("Phase (°)")
-    ax.set_title("Phase — passband detail", fontsize=9)
-    _setup(ax, g_ticks_pb, g_lbls_pb, (G_IEC**(-1.05), G_IEC**(1.05)))
+    fig, (ax_ph, ax_gd) = plt.subplots(1, 2, figsize=(10, 4),
+                                       gridspec_kw={"wspace": 0.3})
 
-    # ── Group delay passband ──────────────────────────────────────────────────
-    ax = axes[0, 1]
-    ax.plot(omega_pb, gd_pb, color=C_RED, lw=1.5)
-    ax.set_ylabel("Group delay (ms)")
-    ax.set_title("Group delay — passband detail", fontsize=9)
-    _setup(ax, g_ticks_pb, g_lbls_pb, (G_IEC**(-1.05), G_IEC**(1.05)))
+    # ── Phase ──────────────────────────────────────────────────────────────────
+    ax_ph.plot(omega, phase_oct, color=C_BLUE, lw=1.5, label=LEG_OCT)
+    ax_ph.plot(omega, phase_t3,  color=C_ORANGE, lw=1.5, label=LEG_T3)
+    ax_ph.set_ylabel("Phase (°)")
+    ax_ph.set_title("Phase", fontsize=9)
+    _setup(ax_ph)
+    ax_ph.legend(fontsize=8, loc="best")
 
-    # ── Phase full range ──────────────────────────────────────────────────────
-    ax = axes[1, 0]
-    ax.plot(omega_full, phase_full, color=C_BLUE, lw=1.5)
-    ax.set_ylabel("Phase (°)")
-    ax.set_title("Phase — full range", fontsize=9)
-    _setup(ax, g_ticks_full, g_lbls_full, (G_IEC**(-4.6), G_IEC**(4.6)))
-
-    # ── Group delay full range ────────────────────────────────────────────────
-    ax = axes[1, 1]
-    ax.plot(omega_full, gd_full, color=C_RED, lw=1.5)
-    ax.set_ylabel("Group delay (ms)")
-    ax.set_title("Group delay — full range", fontsize=9)
-    _setup(ax, g_ticks_full, g_lbls_full, (G_IEC**(-4.6), G_IEC**(4.6)))
+    # ── Group delay ──────────────────────────────────────────────────────────
+    ax_gd.plot(omega, gd_oct, color=C_BLUE, lw=1.5, label=LEG_OCT)
+    ax_gd.plot(omega, gd_t3,  color=C_ORANGE, lw=1.5, label=LEG_T3)
+    ax_gd.set_ylabel("Group delay (ms)")
+    ax_gd.set_title("Group delay", fontsize=9)
+    _setup(ax_gd)
+    ax_gd.legend(fontsize=8, loc="best")
 
     fig.suptitle(
-        f"Octave-Band Filter Phase & Group Delay "
+        f"Octave vs Third-Octave Filter Phase & Group Delay "
         f"($f_m$ = {int(round(f_m))} Hz, Class 1)", fontsize=10)
     fig.tight_layout()
     return fig
@@ -1081,60 +1130,53 @@ def make_fig_4_6c():
     HI_CL1 = +0.8
     DURATION_S = 1.0
 
-    centers, sos_list = _get_filterbank()
-    n_bands = len(centers)
+    def _summation(centers, sos_list, b):
+        """Return (freqs, devs) for all adjacent-pair test frequencies.
 
-    print(f"  computing §5.16 summation deviations "
-          f"({n_bands - 1} pairs × {len(TEST_EXPONENTS)} frequencies)…")
+        Test frequencies span one band spacing, i.e. G^(exp/b) from the lower
+        mid-band (the crossover sits at G^(1/2b)).
+        """
+        n_bands = len(centers)
+        n    = int(round(DURATION_S * SAMPLERATE))
+        t    = np.arange(n) / SAMPLERATE
+        skip = n // 2
+        freqs, devs = [], []
+        for pair_idx in range(n_bands - 1):
+            f_lo   = centers[pair_idx]
+            sos_lo = sos_list[pair_idx]
+            sos_hi = sos_list[pair_idx + 1]
+            a_ref  = -20.0 * np.log10(
+                abs(sig.sosfreqz(sos_lo, worN=[f_lo], fs=SAMPLERATE)[1][0]))
+            l_in   = 10.0 * math.log10(0.5)
+            for exp in TEST_EXPONENTS:
+                f_test = f_lo * G_IEC ** (exp / b)
+                xs     = np.sin(2.0 * np.pi * f_test * t)
+                p_lo   = float(np.mean(_sosfilt(sos_lo, xs)[skip:] ** 2))
+                p_hi   = float(np.mean(_sosfilt(sos_hi, xs)[skip:] ** 2))
+                l_sum  = 10.0 * math.log10(max(p_lo + p_hi, 1e-300))
+                freqs.append(f_test)
+                devs.append((l_in - a_ref) - l_sum)
+        return np.array(freqs), np.array(devs)
 
-    freqs_all = []
-    devs_all  = []
-
-    n    = int(round(DURATION_S * SAMPLERATE))
-    t    = np.arange(n) / SAMPLERATE
-    skip = n // 2
-
-    for pair_idx in range(n_bands - 1):
-        f_lo   = centers[pair_idx]
-        sos_lo = sos_list[pair_idx]
-        sos_hi = sos_list[pair_idx + 1]
-
-        gain_mid = 20.0 * np.log10(
-            abs(sig.sosfreqz(sos_lo, worN=[f_lo], fs=SAMPLERATE)[1][0]))
-        a_ref = -gain_mid
-        l_in  = 10.0 * math.log10(0.5)
-
-        for exp in TEST_EXPONENTS:
-            f_test = f_lo * G_IEC ** exp
-            x      = np.sin(2.0 * np.pi * f_test * t)
-            p_lo   = float(np.mean(_sosfilt(sos_lo, x)[skip:] ** 2))
-            p_hi   = float(np.mean(_sosfilt(sos_hi, x)[skip:] ** 2))
-            l_sum  = 10.0 * math.log10(max(p_lo + p_hi, 1e-300))
-            freqs_all.append(f_test)
-            devs_all.append((l_in - a_ref) - l_sum)
-
-    freqs_all = np.array(freqs_all)
-    devs_all  = np.array(devs_all)
-    in_tol    = (devs_all >= LO_CL1) & (devs_all <= HI_CL1)
+    print("  computing §5.16 summation deviations (octave + third-octave)…")
+    f_oct, d_oct = _summation(*_filterbank(), b=1)
+    f_t3,  d_t3  = _summation(*_filterbank(THIRD_OCTAVE), b=THIRD_OCTAVE.b)
 
     fig, ax = plt.subplots(figsize=(8, 4))
 
     ax.axhspan(LO_CL1, HI_CL1, color=C_FILL, alpha=0.5, label="Class 1 acceptance limits")
     ax.axhline(0, color="black", lw=0.8)
 
-    for f_m in centers:
-        ax.axvline(f_m, color="grey", lw=0.6, ls=":", alpha=0.5)
+    def _plot_band(freqs, devs, color, label):
+        ax.scatter(freqs, devs, color=color, s=30, marker="x", linewidths=1.2,
+                   zorder=5, label=label)
+        out = (devs < LO_CL1) | (devs > HI_CL1)
+        if np.any(out):
+            ax.scatter(freqs[out], devs[out], color=C_OUT, s=55, marker="x",
+                       linewidths=1.8, zorder=6)
 
-    # Connect points within each pair with thin lines
-    for i in range(n_bands - 1):
-        sl = slice(i * len(TEST_EXPONENTS), (i + 1) * len(TEST_EXPONENTS))
-        ax.plot(freqs_all[sl], devs_all[sl], color=C_BLUE, lw=0.8, alpha=0.45)
-
-    ax.scatter(freqs_all[in_tol], devs_all[in_tol],
-               color=C_BLUE, s=28, zorder=5, label="Measured")
-    if not np.all(in_tol):
-        ax.scatter(freqs_all[~in_tol], devs_all[~in_tol],
-                   color=C_OUT, s=28, zorder=5, marker="x", label="Outside acceptance limits")
+    _plot_band(f_oct, d_oct, C_BLUE,   "Octave (1/1)")
+    _plot_band(f_t3,  d_t3,  C_ORANGE, "Third-octave (1/3)")
 
     ax.set_xscale("log")
     ax.set_xlim(50, 15000)
@@ -1453,6 +1495,7 @@ if __name__ == "__main__":
         (make_fig_4_5, "fig_4_5_level_linearity"),
         (make_fig_4_5b, "fig_4_5b_cpeak"),
         (make_fig_4_6, "fig_4_6_octave_filter_mask"),
+        (make_fig_4_6d, "fig_4_6d_octave_filter_mask_16kHz"),
         (make_fig_4_6b, "fig_4_6b_octave_filter_phase_groupdelay"),
         (make_fig_4_6c, "fig_4_6c_octave_summation"),
         (make_fig_4_7, "fig_4_7_xl2_broadband_comparison"),

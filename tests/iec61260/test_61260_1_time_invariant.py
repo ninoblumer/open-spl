@@ -28,7 +28,7 @@ import pytest
 from scipy import signal as sig
 
 from test_61260_1_filters import (
-    G, SAMPLERATE, BANDWIDTHS, FilterConfig, _filterbank,
+    G, SAMPLERATE, BANDWIDTHS, FilterConfig, _filterbank, _nominal_hz,
 )
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,8 @@ class BandCase(NamedTuple):
 
 def time_invariant_cases(cfg: FilterConfig) -> list[BandCase]:
     centers, _ = _filterbank(cfg)
-    return [BandCase(cfg, i, f_m, f"{int(round(f_m))} Hz")
+    nom = _nominal_hz(cfg)
+    return [BandCase(cfg, i, f_m, f"{nom[i]} Hz")
             for i, f_m in enumerate(centers)]
 
 

@@ -266,6 +266,11 @@ def _nominal_labels(cfg: FilterConfig = OCTAVE) -> list[str]:
     return _fb_entry(cfg)["nominal"]
 
 
+def _nominal_hz(cfg: FilterConfig = OCTAVE) -> list[int]:
+    """Nominal mid-band frequencies in Hz (Annex E / Table E.1) for each band."""
+    return [int(round(_nominal_label_to_hz(s))) for s in _nominal_labels(cfg)]
+
+
 def _fb_entry(cfg: FilterConfig) -> dict:
     key = (cfg.b, cfg.limits, cfg.samplerate)
     if key not in _fb_cache:
@@ -314,17 +319,19 @@ class BandCase(NamedTuple):
 
 def passband_cases(cfg: FilterConfig) -> list[AttenCase]:
     centers, _ = _filterbank(cfg)
+    nom = _nominal_hz(cfg)
     cases = []
     for band_idx, f_m in enumerate(centers):
         for exp, (lo, hi) in _PASSBAND_CL1.items():
             f_test = f_m * _omega_for_bandwidth(G ** exp, cfg.b)
             cases.append(AttenCase(cfg, band_idx, f_m, f_test, lo, hi,
-                                   f"{int(round(f_m))} Hz G^{exp:+.3f}"))
+                                   f"{nom[band_idx]} Hz G^{exp:+.3f}"))
     return cases
 
 
 def stopband_cases(cfg: FilterConfig) -> list[AttenCase]:
     centers, _ = _filterbank(cfg)
+    nom = _nominal_hz(cfg)
     f_nyq = cfg.samplerate / 2.0
     cases = []
     for band_idx, f_m in enumerate(centers):
@@ -333,12 +340,13 @@ def stopband_cases(cfg: FilterConfig) -> list[AttenCase]:
             if f_test <= 0.5 or f_test >= f_nyq:
                 continue   # out-of-range stop-band frequency
             cases.append(AttenCase(cfg, band_idx, f_m, f_test, min_da, None,
-                                   f"{int(round(f_m))} Hz G^{exp:+d}"))
+                                   f"{nom[band_idx]} Hz G^{exp:+d}"))
     return cases
 
 
 def band_edge_cases(cfg: FilterConfig) -> list[EdgeCase]:
     centers, _ = _filterbank(cfg)
+    nom = _nominal_hz(cfg)
     f_nyq = cfg.samplerate / 2.0
     cases = []
     for band_idx, f_m in enumerate(centers):
@@ -347,13 +355,14 @@ def band_edge_cases(cfg: FilterConfig) -> list[EdgeCase]:
             if f_edge < 0.5 or f_edge >= f_nyq:
                 continue
             cases.append(EdgeCase(cfg, band_idx, f_m, side,
-                                  f"{int(round(f_m))} Hz {name} edge"))
+                                  f"{nom[band_idx]} Hz {name} edge"))
     return cases
 
 
 def bandwidth_cases(cfg: FilterConfig) -> list[BandCase]:
     centers, _ = _filterbank(cfg)
-    return [BandCase(cfg, i, f_m, f"{int(round(f_m))} Hz")
+    nom = _nominal_hz(cfg)
+    return [BandCase(cfg, i, f_m, f"{nom[i]} Hz")
             for i, f_m in enumerate(centers)]
 
 

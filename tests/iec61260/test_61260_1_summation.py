@@ -28,7 +28,7 @@ import numpy as np
 import pytest
 from scipy import signal as sig
 
-from test_61260_1_filters import G, BANDWIDTHS, FilterConfig, _filterbank
+from test_61260_1_filters import G, BANDWIDTHS, FilterConfig, _filterbank, _nominal_hz
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -85,14 +85,15 @@ class SummationCase(NamedTuple):
 
 def summation_cases(cfg: FilterConfig) -> list[SummationCase]:
     centers, _ = _filterbank(cfg)
+    nom = _nominal_hz(cfg)
     cases = []
     for pair_idx in range(len(centers) - 1):
-        f_lo, f_hi = centers[pair_idx], centers[pair_idx + 1]
+        f_lo = centers[pair_idx]
         for exp in _OCTAVE_EXPONENTS:
             f_test = f_lo * G ** (exp / cfg.b)
             cases.append(SummationCase(
                 cfg, pair_idx, f_test,
-                f"{int(round(f_lo))}/{int(round(f_hi))} Hz @ {f_test:.1f} Hz"))
+                f"{nom[pair_idx]}/{nom[pair_idx + 1]} Hz @ {f_test:.1f} Hz"))
     return cases
 
 
