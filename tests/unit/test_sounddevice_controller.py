@@ -123,10 +123,12 @@ class TestReadBlock:
 
         return ctrl, blocks, indices
 
+    @pytest.mark.slow
     def test_block_count(self):
         _, blocks, _ = self._run_with_fake_stream(n_blocks=10)
         assert len(blocks) == 10
 
+    @pytest.mark.slow
     def test_block_shape(self):
         blocksize, channels = 512, 1
         _, blocks, _ = self._run_with_fake_stream(n_blocks=5, blocksize=blocksize,
@@ -134,6 +136,7 @@ class TestReadBlock:
         for b in blocks:
             assert b.shape == (blocksize, channels)
 
+    @pytest.mark.slow
     def test_block_shape_stereo_clamped_to_mono(self):
         """channels=2 is clamped to 1 with a warning; blocks are always mono."""
         with pytest.warns(UserWarning, match="channel 0"):
@@ -141,10 +144,12 @@ class TestReadBlock:
         for b in blocks:
             assert b.shape == (256, 1)
 
+    @pytest.mark.slow
     def test_block_indices_sequential(self):
         _, _, indices = self._run_with_fake_stream(n_blocks=8)
         assert indices == list(range(8))
 
+    @pytest.mark.slow
     def test_stop_raises_stop_iteration(self):
         ctrl = _make_controller(queue_maxsize=4)
         fake = _FakeStream(ctrl._callback, n_blocks=0, blocksize=1_024, channels=1)
@@ -181,6 +186,7 @@ class TestReadBlock:
         assert ctrl.overruns == 1
 
 
+@pytest.mark.slow
 class TestLoadMonitoring:
 
     def test_rho_mean_populated_after_blocks(self):
@@ -285,6 +291,7 @@ class TestListDevices:
                                           "default_samplerate"}
 
 
+@pytest.mark.slow
 class TestEngineIntegration:
 
     def test_engine_processes_blocks(self):

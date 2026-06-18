@@ -112,7 +112,13 @@ class TestLevelLinearityTotalRange:
         )
 
     def test_slope_is_unity(self, report: bool = False):
-        """Measured level must change 1 dB per 1 dB input change (slope = 1)."""
+        """Measured level must change 1 dB per 1 dB input change (slope = 1).
+
+        NOTE: the ±0.01 bound on the regression slope is a SELF-IMPOSED check,
+        NOT an IEC acceptance limit.  §5.6 specifies linearity via the ±0.8 dB
+        residual (§5.6.5) and ±0.3 dB per-step (§5.6.6) limits, not a slope
+        tolerance, so this row is not shown in the conformance report.
+        """
         l_in, l_meas = _get_sweep()
         slope, _ = np.polyfit(l_in, l_meas, 1)
         margin = 0.01 - abs(slope - 1.0)

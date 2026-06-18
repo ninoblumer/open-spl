@@ -62,7 +62,7 @@ def _leq_over_window(freq_hz: float, amplitude: float, duration_s: float) -> flo
 class TestContinuousOperationStability:
     """IEC 61672-1 §5.14 — 30 min continuous operation, drift ≤ ±0.1 dB."""
 
-    def test_30min_stability_1khz(self):
+    def test_30min_stability_1khz(self, report: bool = False):
         freq_hz   = 1_000
         amplitude = 1.0    # Pa
         window_s  = 10.0   # measure first and last 10 s windows
@@ -86,6 +86,10 @@ class TestContinuousOperationStability:
         l_final = _leq_over_window(freq_hz, amplitude, window_s)
 
         drift = abs(l_final - l_initial)
+        if report:
+            return {"label": "30 min drift @ 1 kHz", "value": drift, "limit": 0.1,
+                    "margin": 0.1 - drift,
+                    "note": f"{l_initial:.4f} -> {l_final:.4f} dB"}
         assert drift <= 0.1, (
             f"30 min stability: L_initial = {l_initial:.4f} dB, "
             f"L_final = {l_final:.4f} dB, drift = {drift:.4f} dB (limit: ±0.1 dB)"
@@ -96,11 +100,12 @@ class TestContinuousOperationStability:
 class TestHighLevelStability:
     """IEC 61672-1 §5.15 — 5 min at high level, drift ≤ ±0.1 dB."""
 
-    def test_5min_high_level_stability(self):
+    def test_5min_high_level_stability(self, report: bool = False):
         freq_hz = 1_000
-        # 1 dB below upper boundary: level linearity tests pass over 120 dB,
-        # so use 109 dB SPL (1 dB below the 110 dB top of the tested range).
-        amplitude = p0 * np.sqrt(2) * 10 ** (109.0 / 20.0)
+        # Stress the floating-point accumulator at an extreme level: 199 dB SPL.
+        # (Well above any physical/linear range — this purely checks that the
+        # software meter stays numerically stable over a long run at high level.)
+        amplitude = p0 * np.sqrt(2) * 10 ** (199.0 / 20.0)
         window_s  = 10.0
 
         l_initial = _leq_over_window(freq_hz, amplitude, window_s)
@@ -117,6 +122,10 @@ class TestHighLevelStability:
         l_final = _leq_over_window(freq_hz, amplitude, window_s)
 
         drift = abs(l_final - l_initial)
+        if report:
+            return {"label": "5 min drift @ 199 dB", "value": drift, "limit": 0.1,
+                    "margin": 0.1 - drift,
+                    "note": f"{l_initial:.4f} -> {l_final:.4f} dB"}
         assert drift <= 0.1, (
             f"5 min high-level stability: L_initial = {l_initial:.4f} dB, "
             f"L_final = {l_final:.4f} dB, drift = {drift:.4f} dB (limit: ±0.1 dB)"

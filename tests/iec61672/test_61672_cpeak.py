@@ -152,10 +152,19 @@ class TestCWeightedPeak:
 
 
 class TestCPeakHalfCycleSymmetry:
-    """IEC 61672-1 §5.13 — positive and negative half-cycles give equal L_Cpeak."""
+    """Positive and negative half-cycles give near-equal L_Cpeak at 500 Hz.
+
+    NOTE: SELF-IMPOSED check — NOT an IEC acceptance limit.  Table 5 lists the
+    same reference difference (2.4 dB) and ±1.0 dB limit for both the positive
+    and negative half-cycle at 500 Hz, but the standard defines no tolerance on
+    the *difference between* them.  The 1.5 dB bound here is borrowed from the
+    §5.11.3 overload-symmetry requirement as a sanity check, so it is not shown
+    in the conformance report.
+    """
 
     def test_half_cycle_symmetry_500hz(self, report: bool = False):
-        """Difference between positive and negative half-cycle peaks ≤ 1.5 dB."""
+        """Difference between positive and negative half-cycle peaks ≤ 1.5 dB
+        (self-imposed sanity bound — see class docstring)."""
         diff_pos = _cpeak_minus_lc(500, "pos_half")
         diff_neg = _cpeak_minus_lc(500, "neg_half")
         asymmetry = abs(diff_pos - diff_neg)

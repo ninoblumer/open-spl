@@ -86,6 +86,7 @@ class TestReadBlock:
         for b in blocks:
             assert b.dtype == np.float32
 
+    @pytest.mark.slow
     def test_stop_raises_stop_iteration(self):
         ctrl = _make_controller()
         ctrl.stop()  # sets stop event; no producer running so queue stays empty
@@ -165,6 +166,7 @@ class TestNonRealtimeMode:
         ctrl.stop()
         assert ctrl.overruns > 0
 
+    @pytest.mark.slow
     def test_non_realtime_blocks_on_full_queue(self):
         """realtime=False: when the consumer never reads, the producer fills the
         queue then blocks retrying put() (queue.Full path), without overrunning."""
@@ -175,6 +177,7 @@ class TestNonRealtimeMode:
         assert ctrl.overruns == 0  # non-realtime mode never drops blocks
 
 
+@pytest.mark.slow
 class TestNBlocksLimit:
 
     def test_n_blocks_stops_producer(self):
@@ -195,6 +198,7 @@ class TestNBlocksLimit:
 
 class TestEngineIntegration:
 
+    @pytest.mark.slow
     def test_engine_processes_blocks(self):
         from slm.engine import Engine
         from slm.assembly import parse_metric, build_chain

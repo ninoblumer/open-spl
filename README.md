@@ -376,7 +376,9 @@ Unknown top-level sections or unknown keys within a section raise a `ValueError`
 ## Running the tests
 
 The test suite lives under `tests/` (unit tests plus IEC 61260-1 / 61672-1 conformance and
-XL2 hardware-comparison integration tests). Run it with pytest:
+XL2 hardware-comparison integration tests). The IEC 61260-1 filter conformance tests are
+parametric over filter bandwidth — they run for octave and 1/3-octave banks (extend
+`BANDWIDTHS` in `tests/iec61260/test_61260_1_filters.py` to cover others). Run it with pytest:
 
 ```bash
 python -m pytest tests/ -q

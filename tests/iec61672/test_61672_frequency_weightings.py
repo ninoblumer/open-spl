@@ -167,13 +167,21 @@ class TestCWeightingClass1:
 
 
 class TestZWeightingFlat:
-    """IEC 61672-1 Annex E.5 — Z-weighting is a flat passthrough (0 dB)."""
+    """IEC 61672-1 Annex E.5 — Z-weighting is a flat passthrough (0 dB).
+
+    NOTE: the ±0.1 dB bound is a SELF-IMPOSED limit, NOT the IEC acceptance
+    limit.  The standard's Z-weighting acceptance limits are the Table 3 class-1
+    limits (the same ±0.7…+3 dB column as A/C); ±0.1 dB is a much tighter check
+    that our implementation is an essentially perfect passthrough.  Conformance
+    against the real Table 3 Z limits would pass trivially, so this stricter
+    self-check is kept in the suite but is not shown in the conformance report.
+    """
 
     @pytest.mark.parametrize("row", _TABLE3, ids=_TABLE3_IDS)
     def test_gain_is_zero(self, row, report: bool = False):
         freq_hz = row[0]
         gain = _measure_gain_db(PluginZWeighting, freq_hz)
-        cl1_lo, cl1_hi = -0.1, +0.1
+        cl1_lo, cl1_hi = -0.1, +0.1   # self-imposed flatness bound (see docstring)
         margin = min(gain - cl1_lo, cl1_hi - gain)
         if report:
             return {"label": f"{freq_hz} Hz", "deviation": gain,
@@ -184,7 +192,14 @@ class TestZWeightingFlat:
 
 
 class TestNormalisationAt1kHz:
-    """IEC 61672-1 §5.5 — all three weightings are normalised to 0 dB at 1 kHz."""
+    """IEC 61672-1 §5.5 — all three weightings are normalised to 0 dB at 1 kHz.
+
+    NOTE: the ±0.05 dB bound is a SELF-IMPOSED limit, NOT an IEC acceptance
+    limit.  §5.5.1 states the design goal is 0 dB at 1 kHz; the actual
+    acceptance limit there is the Table 3 class-1 value (±0.7 dB).  ±0.05 dB is a
+    tighter implementation-precision check, so it is not shown in the conformance
+    report.
+    """
 
     @staticmethod
     def _report(label: str, gain: float) -> dict:

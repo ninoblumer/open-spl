@@ -8,6 +8,7 @@ Usage:
     python scripts/conformance_report.py
     python scripts/conformance_report.py --no-color
     python scripts/conformance_report.py --precision 4
+    python scripts/conformance_report.py --slow   # include §5.14/§5.15 stability
 """
 from __future__ import annotations
 
@@ -21,8 +22,8 @@ sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "tests" / "iec61260"))
 
 from tests.iec61672.test_61672_frequency_weightings import (
-    TestAWeightingClass1, TestCWeightingClass1, TestZWeightingFlat,
-    TestNormalisationAt1kHz, TestWeightingDifferencesAt1kHz, _TABLE3,
+    TestAWeightingClass1, TestCWeightingClass1,
+    TestWeightingDifferencesAt1kHz, _TABLE3,
 )
 from tests.iec61672.test_61672_time_weightings import (
     TestFastTimeWeightingDecayRate, TestSlowTimeWeightingDecayRate,
@@ -32,27 +33,30 @@ from tests.iec61672.test_61672_toneburst import (
     TestFmaxToneburst, TestSELToneburst, TestSmaxToneburst, _TABLE4, _TABLE4_SMAX,
 )
 from tests.iec61672.test_61672_cpeak import (
-    TestCWeightedPeak, TestCPeakHalfCycleSymmetry, _TABLE5,
+    TestCWeightedPeak, _TABLE5,
 )
 from tests.iec61672.test_61672_level_linearity import (
     TestLevelLinearityTotalRange, TestLevelLinearityIncremental,
     TestLinearRangeWidth,
 )
 from tests.iec61672.test_61672_laeq_sel import (
-    TestLeqFormula, TestSELFormula, TestRepeatedTonebursts, _REPEATED,
+    TestRepeatedTonebursts, _REPEATED,
+)
+from tests.iec61672.test_61672_stability import (
+    TestContinuousOperationStability, TestHighLevelStability,
 )
 from tests.iec61260.test_61260_1_filters import (
     TestOctaveRelativeAttenuation, TestOctaveEffectiveBandwidth,
-    TestOctaveBandEdges, _PB_PARAMS, _SB_PARAMS, _BAND_IDS,
+    BANDWIDTHS, passband_cases, stopband_cases, bandwidth_cases,
 )
 from tests.iec61260.test_61260_1_summation import (
-    TestSummationOfOutputSignals, _PARAMS as _SUMMATION_PARAMS,
+    TestSummationOfOutputSignals, summation_cases,
 )
 from tests.iec61260.test_61260_1_level_linearity import (
-    TestLinearOperatingRange, _centers as _LIN_CENTERS,
+    TestLinearOperatingRange, linearity_cases,
 )
 from tests.iec61260.test_61260_1_time_invariant import (
-    TestTimeInvariantOperation, _centers as _TI_CENTERS,
+    TestTimeInvariantOperation, time_invariant_cases,
 )
 
 # ---------------------------------------------------------------------------
@@ -213,7 +217,7 @@ def _print_bw_section(title: str, rows: list[dict], p: int = 3) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
-def main(precision: int = 3) -> None:
+def main(precision: int = 3, slow: bool = False) -> None:
     p = precision
     print(f"\n{_B}IEC 61672-1:2013 / IEC 61260-1:2014 Conformance Margin Report{_X}")
 
@@ -228,22 +232,6 @@ def main(precision: int = 3) -> None:
     _print_weighting_section(
         "IEC 61672-1 §5.5 C-weighting (class 1)",
         [c_test.test_gain_within_class1(row, report=True) for row in _TABLE3], p,
-    )
-
-    z_test = TestZWeightingFlat()
-    _print_weighting_section(
-        "IEC 61672-1 Annex E.5 Z-weighting (flat, ±0.1 dB)",
-        [z_test.test_gain_is_zero(row, report=True) for row in _TABLE3], p,
-    )
-
-    norm_test = TestNormalisationAt1kHz()
-    _print_weighting_section(
-        "IEC 61672-1 §5.5 Normalisation at 1 kHz (0 dB ± 0.05 dB)",
-        [
-            norm_test.test_a_weighting(report=True),
-            norm_test.test_c_weighting(report=True),
-            norm_test.test_z_weighting(report=True),
-        ], p,
     )
 
     diff_test = TestWeightingDifferencesAt1kHz()
@@ -304,6 +292,9 @@ def main(precision: int = 3) -> None:
     )
 
     # --- IEC 61672-1 §5.6 Level linearity ---
+    # (§5.6.5 residuals ±0.8 dB and §5.6.6 1 dB-step deviation ±0.3 dB are the
+    #  standard-defined acceptance limits; the regression-slope check is a
+    #  self-imposed sanity test and is intentionally not reported here.)
     print("\n", end="", flush=True)
     lin_test  = TestLevelLinearityTotalRange()
     inc_test  = TestLevelLinearityIncremental()
@@ -311,7 +302,6 @@ def main(precision: int = 3) -> None:
         "IEC 61672-1 §5.6 Level linearity (class 1, 1 kHz)",
         [
             lin_test.test_residuals_within_08dB(report=True),
-            lin_test.test_slope_is_unity(report=True),
             inc_test.test_1dB_steps(report=True),
         ], p,
     )
@@ -321,80 +311,72 @@ def main(precision: int = 3) -> None:
         [TestLinearRangeWidth().test_linear_range_at_least_60dB(report=True)], p,
     )
 
-    # --- IEC 61672-1 §3.9 / §3.12 L_Aeq and SEL formulae ---
-    leq_test = TestLeqFormula()
-    sel_form = TestSELFormula()
-    _print_weighting_section(
-        "IEC 61672-1 §3.9 / §3.12 L_Aeq and SEL formulae (± 0.05 dB)",
-        [
-            leq_test.test_laeq_1khz_unit_amplitude(report=True),
-            sel_form.test_sel_equals_leq_plus_duration_term(report=True),
-            sel_form.test_sel_reference_exposure(report=True),
-        ], p,
-    )
+    # --- IEC 61672-1 §5.14 / §5.15 Long-time stability (slow) ---
+    if slow:
+        print("\n  (running long-time stability tests, this takes a while...)",
+              flush=True)
+        _print_linearity_section(
+            "IEC 61672-1 §5.14 / §5.15 Long-time stability (drift <= 0.1 dB)",
+            [
+                TestContinuousOperationStability().test_30min_stability_1khz(report=True),
+                TestHighLevelStability().test_5min_high_level_stability(report=True),
+            ], p,
+        )
 
-    # --- Scalar consistency checks (value vs upper limit) ---
-    _print_linearity_section(
-        "IEC 61672-1 scalar consistency checks",
-        [
-            leq_test.test_laeq_consistent_across_durations(report=True),
-            TestCPeakHalfCycleSymmetry().test_half_cycle_symmetry_500hz(report=True),
-        ], p,
-    )
-
-    # --- IEC 61260-1 §5.6 Band edges ---
-    edge_test = TestOctaveBandEdges()
-    _print_filter_section(
-        "IEC 61260-1 §5.6 Octave band edges (class 1, worst per band)",
-        [edge_test.test_lower_band_edge(i, report=True) for i in range(8)]
-        + [edge_test.test_upper_band_edge(i, report=True) for i in range(8)], p,
-    )
-
-    # --- IEC 61260-1 §5.10 Pass-band ---
-    pb_test = TestOctaveRelativeAttenuation()
-    _print_filter_section(
-        "IEC 61260-1 §5.10 Octave pass-band attenuation (class 1, worst per band)",
-        [pb_test.test_passband(row, report=True) for row in _PB_PARAMS], p,
-    )
-
-    # --- IEC 61260-1 §5.10 Stop-band ---
-    _print_filter_section(
-        "IEC 61260-1 §5.10 Octave stop-band attenuation (class 1, worst per band)",
-        [pb_test.test_stopband(row, report=True) for row in _SB_PARAMS], p,
-    )
-
-    # --- IEC 61260-1 §5.12 Effective bandwidth ---
-    bw_test = TestOctaveEffectiveBandwidth()
-    _print_bw_section(
-        "IEC 61260-1 §5.12 Effective bandwidth deviation DB (class 1)",
-        [bw_test.test_bandwidth_deviation(i, report=True) for i in range(8)], p,
-    )
-
-    # --- IEC 61260-1 §5.13 Level linearity ---
+    # --- IEC 61260-1 filter conformance, once per bandwidth in BANDWIDTHS ---
+    # Mid-band frequencies (§5.4) and band edges (§5.6) are omitted: the standard
+    # defines f_m exactly by formula (no acceptance tolerance) and the band-edge
+    # value sits in a Table-1 discontinuity rather than at a defined limit, so the
+    # tolerances those tests use are self-imposed (see the test files).
+    pb_test   = TestOctaveRelativeAttenuation()
+    bw_test   = TestOctaveEffectiveBandwidth()
     lin260_test = TestLinearOperatingRange()
-    lin260_rows = [
-        row
-        for i in range(len(_LIN_CENTERS))
-        for row in lin260_test.test_level_linearity(i, report=True)
-    ]
-    _print_filter_section(
-        "IEC 61260-1 §5.13 Octave level linearity (class 1, worst per band)",
-        lin260_rows, p,
-    )
+    ti_test     = TestTimeInvariantOperation()
+    sum_test    = TestSummationOfOutputSignals()
 
-    # --- IEC 61260-1 §5.14 Time-invariant operation ---
-    ti_test = TestTimeInvariantOperation()
-    _print_filter_section(
-        "IEC 61260-1 §5.14 Octave time-invariant operation (class 1)",
-        [ti_test.test_time_invariant(i, report=True) for i in range(len(_TI_CENTERS))], p,
-    )
+    for cfg in BANDWIDTHS:
+        bw = cfg.name
 
-    # --- IEC 61260-1 §5.16 Summation of output signals ---
-    sum_test = TestSummationOfOutputSignals()
-    _print_filter_section(
-        "IEC 61260-1 §5.16 Octave summation (class 1, worst per band pair)",
-        [sum_test.test_summation(row, report=True) for row in _SUMMATION_PARAMS], p,
-    )
+        # --- §5.10 Pass-band ---
+        _print_filter_section(
+            f"IEC 61260-1 §5.10 Pass-band attenuation ({bw}, class 1, worst per band)",
+            [pb_test.test_passband(c, report=True) for c in passband_cases(cfg)], p,
+        )
+
+        # --- §5.10 Stop-band ---
+        _print_filter_section(
+            f"IEC 61260-1 §5.10 Stop-band attenuation ({bw}, class 1, worst per band)",
+            [pb_test.test_stopband(c, report=True) for c in stopband_cases(cfg)], p,
+        )
+
+        # --- §5.12 Effective bandwidth ---
+        _print_bw_section(
+            f"IEC 61260-1 §5.12 Effective bandwidth deviation DB ({bw}, class 1)",
+            [bw_test.test_bandwidth_deviation(c, report=True) for c in bandwidth_cases(cfg)], p,
+        )
+
+        # --- §5.13 Level linearity ---
+        lin260_rows = [
+            row
+            for c in linearity_cases(cfg)
+            for row in lin260_test.test_level_linearity(c, report=True)
+        ]
+        _print_filter_section(
+            f"IEC 61260-1 §5.13 Level linearity ({bw}, class 1, worst per band)",
+            lin260_rows, p,
+        )
+
+        # --- §5.14 Time-invariant operation ---
+        _print_filter_section(
+            f"IEC 61260-1 §5.14 Time-invariant operation ({bw}, class 1)",
+            [ti_test.test_time_invariant(c, report=True) for c in time_invariant_cases(cfg)], p,
+        )
+
+        # --- §5.16 Summation of output signals ---
+        _print_filter_section(
+            f"IEC 61260-1 §5.16 Summation ({bw}, class 1, worst per band pair)",
+            [sum_test.test_summation(c, report=True) for c in summation_cases(cfg)], p,
+        )
 
     print()
     print("=" * 74)
@@ -411,5 +393,8 @@ if __name__ == "__main__":
                         help="disable ANSI colour output")
     parser.add_argument("--precision", type=int, default=3, metavar="N",
                         help="decimal places for reported values and margins (default: 3)")
+    parser.add_argument("--slow", action="store_true",
+                        help="include the long-time stability tests (§5.14/§5.15); "
+                             "these take several minutes to run")
     args = parser.parse_args()
-    main(precision=args.precision)
+    main(precision=args.precision, slow=args.slow)

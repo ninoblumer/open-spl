@@ -103,7 +103,14 @@ def _measure_leq_window(signal: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 
 class TestLeqFormula:
-    """IEC 61672-1 §3.9 — L_Aeq,T = 10·log₁₀((1/T)·∫p_A²dt / p₀²)."""
+    """IEC 61672-1 §3.9 — L_Aeq,T = 10·log₁₀((1/T)·∫p_A²dt / p₀²).
+
+    NOTE: §3.9 / §3.12 are *definitions*, not performance specifications — the
+    standard sets no acceptance limit on how exactly an implementation must
+    reproduce these formulae.  The ±0.05 dB / 0.1 dB bounds below are
+    SELF-IMPOSED implementation-accuracy checks, so they are not shown in the
+    conformance report.
+    """
 
     def test_laeq_1khz_unit_amplitude(self, report: bool = False):
         """A-weighted Leq of 1 kHz unit-amplitude sine matches analytic value."""
@@ -150,7 +157,12 @@ class TestLeqFormula:
 # ---------------------------------------------------------------------------
 
 class TestSELFormula:
-    """IEC 61672-1 §3.12 — L_AE,T = L_Aeq,T + 10·log₁₀(T/T₀)."""
+    """IEC 61672-1 §3.12 — L_AE,T = L_Aeq,T + 10·log₁₀(T/T₀).
+
+    NOTE: §3.12 is a *definition*; the ±0.05 dB bounds below are SELF-IMPOSED
+    implementation-accuracy checks, not IEC acceptance limits, and are not shown
+    in the conformance report.
+    """
 
     def test_sel_equals_leq_plus_duration_term(self, report: bool = False):
         """L_AE − L_Aeq = 10·log₁₀(T/T₀) for a stationary 1 kHz sine."""

@@ -1,12 +1,14 @@
 """IEC 61260-1:2014 §5.13 — Linear operating range (class 1).
 
-At the exact mid-band frequency of each octave-band filter, the level linearity
-deviation shall be:
+At the exact mid-band frequency of each filter, the level linearity deviation
+shall be:
 
     §5.13.3: ±0.5 dB for the upper 40 dB of the linear operating range
     §5.13.4: ±0.7 dB for the remaining lower zone
 
-over a minimum linear operating range of 60 dB (§5.13.1, class 1).
+over a minimum linear operating range of 60 dB (§5.13.1, class 1).  §5.13.1
+states these limits apply "for all filter bandwidths", so this test is
+parametric over bandwidth (see ``BANDWIDTHS`` in test_61260_1_filters).
 
 Level linearity deviation is defined as:
 
@@ -21,12 +23,13 @@ construction.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import numpy as np
 import pytest
 from scipy import signal as sig
 
-from test_61260_1_filters import SAMPLERATE, _get_filterbank
+from test_61260_1_filters import BANDWIDTHS, FilterConfig, _filterbank
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -46,13 +49,13 @@ _LEVEL_DB = list(range(0, -int(LINEAR_RANGE_DB) - 1, -5))   # [0, -5, …, -60]
 # ---------------------------------------------------------------------------
 
 def _filter_mean_sq(sos: np.ndarray, f_m: float, amplitude: float,
-                    duration: float = 0.5) -> float:
+                    samplerate: int, duration: float = 0.5) -> float:
     """Steady-state mean-square output for a sine at *f_m* scaled by *amplitude*.
 
     Uses the second half of the signal to skip the startup transient.
     """
-    n    = int(round(duration * SAMPLERATE))
-    t    = np.arange(n) / SAMPLERATE
+    n    = int(round(duration * samplerate))
+    t    = np.arange(n) / samplerate
     skip = n // 2
     x    = amplitude * np.sin(2.0 * math.pi * f_m * t)
     y    = sig.sosfilt(sos, x)
@@ -60,11 +63,28 @@ def _filter_mean_sq(sos: np.ndarray, f_m: float, amplitude: float,
 
 
 # ---------------------------------------------------------------------------
-# Module-level filter bank
+# Parametric test cases
 # ---------------------------------------------------------------------------
 
-_centers, _sos_list = _get_filterbank()
-_BAND_IDS = [f"{int(round(f))}Hz" for f in _centers]
+class BandCase(NamedTuple):
+    cfg: FilterConfig
+    band_idx: int
+    f_m: float
+    label: str
+
+
+def linearity_cases(cfg: FilterConfig) -> list[BandCase]:
+    centers, _ = _filterbank(cfg)
+    return [BandCase(cfg, i, f_m, f"{int(round(f_m))} Hz")
+            for i, f_m in enumerate(centers)]
+
+
+_PARAMS: list[BandCase] = []
+_IDS:    list[str]      = []
+for _cfg in BANDWIDTHS:
+    for _case in linearity_cases(_cfg):
+        _PARAMS.append(_case)
+        _IDS.append(f"{_cfg.name}-{_case.label.replace(' ', '')}")
 
 
 # ---------------------------------------------------------------------------
@@ -74,18 +94,20 @@ _BAND_IDS = [f"{int(round(f))}Hz" for f in _centers]
 class TestLinearOperatingRange:
     """§5.13 — level linearity over 60 dB amplitude range, class 1.
 
-    Each test covers one octave-band filter at its exact mid-band frequency.
+    Each test covers one band filter at its exact mid-band frequency.
     Amplitudes span 0 dB to −60 dB relative in 5 dB steps.
     Zone limits: ±0.5 dB (upper 40 dB) / ±0.7 dB (lower 20 dB).
     """
 
-    @pytest.mark.parametrize("band_idx", range(len(_centers)), ids=_BAND_IDS)
-    def test_level_linearity(self, band_idx: int, report: bool = False):
-        f_m = _centers[band_idx]
-        sos = _sos_list[band_idx]
+    @pytest.mark.parametrize("case", _PARAMS, ids=_IDS)
+    def test_level_linearity(self, case: BandCase, report: bool = False):
+        _, sos_list = _filterbank(case.cfg)
+        f_m = case.f_m
+        sos = sos_list[case.band_idx]
+        sr  = case.cfg.samplerate
 
         # Reference output at amplitude = 1.0
-        ms_ref = _filter_mean_sq(sos, f_m, amplitude=1.0)
+        ms_ref = _filter_mean_sq(sos, f_m, 1.0, sr)
         l_ref  = 10.0 * math.log10(max(ms_ref, 1e-300))
 
         rows     = []
@@ -93,7 +115,7 @@ class TestLinearOperatingRange:
 
         for level_db in _LEVEL_DB[1:]:   # skip 0 dB (reference; dev = 0 by definition)
             amplitude = 10.0 ** (level_db / 20.0)
-            ms_meas   = _filter_mean_sq(sos, f_m, amplitude)
+            ms_meas   = _filter_mean_sq(sos, f_m, amplitude, sr)
             l_meas    = 10.0 * math.log10(max(ms_meas, 1e-300))
             dev       = l_meas - (l_ref + level_db)
             limit     = LIMIT_UPPER_CL1 if level_db >= -UPPER_ZONE_DB else LIMIT_LOWER_CL1
@@ -114,24 +136,26 @@ class TestLinearOperatingRange:
         if report:
             return rows
         assert not failures, (
-            f"Band {f_m:.1f} Hz linear operating range failures:\n"
+            f"{case.cfg.name} band {f_m:.1f} Hz linear operating range failures:\n"
             + "\n".join(failures)
         )
 
-    @pytest.mark.parametrize("band_idx", range(len(_centers)), ids=_BAND_IDS)
-    def test_linear_range_width(self, band_idx: int):
+    @pytest.mark.parametrize("case", _PARAMS, ids=_IDS)
+    def test_linear_range_width(self, case: BandCase):
         """§5.13.1 — linear operating range at mid-band is at least 60 dB."""
-        f_m = _centers[band_idx]
-        sos = _sos_list[band_idx]
+        _, sos_list = _filterbank(case.cfg)
+        f_m = case.f_m
+        sos = sos_list[case.band_idx]
+        sr  = case.cfg.samplerate
 
-        ms_ref = _filter_mean_sq(sos, f_m, amplitude=1.0)
+        ms_ref = _filter_mean_sq(sos, f_m, 1.0, sr)
         l_ref  = 10.0 * math.log10(max(ms_ref, 1e-300))
 
         # Walk down in 1 dB steps until deviation exceeds ±0.7 dB (most relaxed limit)
         linear_range_db = 0.0
         for level_db in range(0, -121, -1):
             amplitude = 10.0 ** (level_db / 20.0)
-            ms_meas   = _filter_mean_sq(sos, f_m, amplitude)
+            ms_meas   = _filter_mean_sq(sos, f_m, amplitude, sr)
             l_meas    = 10.0 * math.log10(max(ms_meas, 1e-300))
             dev       = abs(l_meas - (l_ref + level_db))
             if dev > LIMIT_LOWER_CL1:
@@ -139,6 +163,6 @@ class TestLinearOperatingRange:
             linear_range_db = abs(level_db)
 
         assert linear_range_db >= LINEAR_RANGE_DB, (
-            f"Band {f_m:.1f} Hz: linear range = {linear_range_db:.0f} dB "
+            f"{case.cfg.name} band {f_m:.1f} Hz: linear range = {linear_range_db:.0f} dB "
             f"(class 1 minimum: {LINEAR_RANGE_DB:.0f} dB)"
         )
