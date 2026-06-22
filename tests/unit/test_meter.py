@@ -211,6 +211,62 @@ class TestLastMovingMeter:
         assert m.read()[0] == 11.0
 
 
+class TestMovingMeterExactness:
+    """The partial-block moving meters must equal a per-sample reference window
+    exactly, independent of blocksize — including blocksizes that do not divide
+    the window length ``n = round(t·fs)`` (so the oldest block is partial)."""
+
+    @staticmethod
+    def _window(signal: np.ndarray, n: int, endpos: int) -> np.ndarray:
+        """The exact last-``n`` samples ending at ``endpos`` (front zero-padded
+        before the start of the stream, mirroring the zero-initialised FIFO)."""
+        start = endpos - n
+        if start >= 0:
+            return signal[start:endpos]
+        return np.concatenate([np.zeros(-start), signal[:endpos]])
+
+    def _check(self, meter_cls, reduce_ref, blocksize, *, width=1):
+        rng = np.random.default_rng(42)
+        fs = 100
+        t = 0.23                              # n = 23 samples
+        n = round(t * fs)
+        total = 50
+        signal = rng.random((width, total))   # non-negative, like Pa²
+        p = _moving_parent(width=width, samplerate=fs, blocksize=blocksize)
+        m = meter_cls(name="m", parent=p, t=t)
+
+        for b in range(total // blocksize):
+            blk = signal[:, b * blocksize:(b + 1) * blocksize]
+            m.process(blk)
+            endpos = (b + 1) * blocksize
+            ref = np.array([reduce_ref(self._window(signal[ch], n, endpos))
+                            for ch in range(width)])
+            np.testing.assert_allclose(m.read(), ref, rtol=1e-9, atol=1e-12)
+
+    @pytest.mark.parametrize("blocksize", [4, 7, 10, 13, 23])
+    def test_leq_matches_per_sample_reference(self, blocksize):
+        self._check(LeqMovingMeter, lambda w: w.sum() / 23, blocksize)
+
+    @pytest.mark.parametrize("blocksize", [4, 7, 10, 13])
+    def test_max_matches_per_sample_reference(self, blocksize):
+        self._check(MaxMovingMeter, np.max, blocksize)
+
+    @pytest.mark.parametrize("blocksize", [4, 7, 10, 13])
+    def test_min_matches_per_sample_reference(self, blocksize):
+        self._check(MinMovingMeter, np.min, blocksize)
+
+    def test_leq_multichannel(self):
+        self._check(LeqMovingMeter, lambda w: w.sum() / 23, blocksize=7, width=3)
+
+    def test_window_is_exact_n_samples(self):
+        """Window length is round(t·fs), not rounded up to a whole block."""
+        p = _moving_parent(samplerate=48000, blocksize=1024)
+        m = LeqMovingMeter(name="m", parent=p, t=1.0)
+        assert m._n == 48000
+        assert m.n_blocks == 47            # ceil(48000/1024)
+        assert m._o == (-48000) % 1024     # 128
+
+
 # ---------------------------------------------------------------------------
 # to_str coverage
 # ---------------------------------------------------------------------------

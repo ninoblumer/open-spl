@@ -147,19 +147,52 @@ class LastAccumulatingMeter(AccumulatingMeter):
 # ---------------------------------------------------------------------------
 
 class MovingMeter(Meter, ABC):
+    """Rolling-window meter over exactly ``round(t·fs)`` samples.
+
+    The engine snapshots once per block, so every ``read()`` lands on a block
+    boundary.  That fixes the window's start offset: the only block partially
+    inside the window is the *oldest*, contributing its suffix ``block[:, o:]``
+    (``o = (-n) % blocksize``); every newer block is wholly inside.  Each block
+    we store its whole-block aggregate (``_fifo_full``) and its tail aggregate
+    (``_fifo_part``).  ``read()`` reduces the window as: the oldest block's tail
+    combined with every newer block's whole-block aggregate — exactly ``n``
+    samples wide, independent of blocksize (no rounding up to a whole block).
+
+    Subclasses pick the reduction by setting ``_ufunc`` to a binary numpy ufunc
+    (``np.add`` for Leq/LE, ``np.maximum`` / ``np.minimum`` for max/min); both
+    the per-block push and the window combine use it.
+    """
 
     t: float = property(lambda self: self._t)
+    _ufunc: np.ufunc
 
     def __init__(self, *, t: float | None = None, **kwargs):
         super().__init__(**kwargs)
         if t is None:
             t = self.parent.bus.dt
         self._t = t
-        self.n_blocks = ceil(t * self.samplerate / self.blocksize)
-        self._fifo = FIFO((self.width, self.n_blocks))
+        self._n = round(self._t * self.samplerate)         # window length, samples
+        self.n_blocks = ceil(self._n / self.blocksize)
+        self._o = (-self._n) % self.blocksize              # tail start offset within a block
+        self._fifo_full = FIFO((self.width, self.n_blocks))   # whole-block aggregate
+        self._fifo_part = FIFO((self.width, self.n_blocks))   # tail (block[:, o:]) aggregate
 
-    @abstractmethod
-    def process(self, block: np.ndarray): ...
+    def process(self, block: np.ndarray):
+        self._fifo_full.push(self._ufunc.reduce(block, axis=-1))
+        self._fifo_part.push(self._ufunc.reduce(block[:, self._o:], axis=-1))
+
+    def _window(self) -> np.ndarray:
+        """Reduce the exact n-sample window: the oldest block's tail aggregate
+        combined with the whole-block aggregate of every other block.  Reduces
+        over buffer *views* — no whole-buffer copy."""
+        oldest = self._fifo_full.index            # slot overwritten next = current oldest
+        full = self._fifo_full.buffer
+        acc = self._fifo_part.buffer[:, oldest].copy()        # oldest → its tail only
+        if oldest > 0:                                        # newer blocks left of oldest
+            acc = self._ufunc(acc, self._ufunc.reduce(full[:, :oldest], axis=1))
+        if oldest + 1 < self.n_blocks:                        # newer blocks right of oldest
+            acc = self._ufunc(acc, self._ufunc.reduce(full[:, oldest + 1:], axis=1))
+        return acc
 
     @abstractmethod
     def read(self) -> np.ndarray: ...
@@ -169,49 +202,47 @@ class MovingMeter(Meter, ABC):
 
 
 class LeqMovingMeter(MovingMeter):
-    """Rolling energy-mean Leq over a window of ``t`` seconds.
+    """Rolling energy-mean Leq over exactly ``round(t·fs)`` samples.
 
     Attaches to a squared (Pa²) source — a ``PluginSquare`` — so the meter never
-    squares.  Each FIFO slot stores the mean square for one block; ``read()``
-    returns the mean of those values — the energy mean over the window.
+    squares.  ``read()`` is the window's summed Pa² divided by ``n``.
     """
 
-    def process(self, block: np.ndarray):
-        self._fifo.push(np.sum(block, axis=-1) / block.shape[-1])
+    _ufunc = np.add
 
     def read(self) -> np.ndarray:
-        return self._fifo.map(np.mean)
+        return self._window() / self._n
 
 
 class MaxMovingMeter(MovingMeter):
-    """Rolling maximum over a window of ``t`` seconds."""
+    """Rolling maximum over exactly ``round(t·fs)`` samples (Pa² input)."""
 
-    def process(self, block: np.ndarray):
-        self._fifo.push(np.max(block, axis=-1))
+    _ufunc = np.maximum
 
     def read(self) -> np.ndarray:
-        return self._fifo.map(np.max)
+        return self._window()
 
 
 class MinMovingMeter(MovingMeter):
-    """Rolling minimum over a window of ``t`` seconds."""
+    """Rolling minimum over exactly ``round(t·fs)`` samples (Pa² input)."""
 
-    def process(self, block: np.ndarray):
-        self._fifo.push(np.min(block, axis=-1))
+    _ufunc = np.minimum
 
     def read(self) -> np.ndarray:
-        return self._fifo.map(np.min)
+        return self._window()
 
 
 class LastMovingMeter(MovingMeter):
-    """Exposes only the last (most-recent) sample of the rolling window."""
+    """Exposes only the last (most-recent) sample seen."""
+
+    _ufunc = np.add   # unused: process/read are overridden
 
     def process(self, block: np.ndarray):
-        self._fifo.push(block[:, -1])
+        self._fifo_full.push(block[:, -1])
 
     def read(self) -> np.ndarray:
-        # FIFO.get() returns ordered buffer (oldest→newest); [:, -1] is most recent.
-        return self._fifo.get()[:, -1]
+        recent = (self._fifo_full.index - 1) % self._fifo_full.size
+        return self._fifo_full.buffer[:, recent]
 
 
 class LEAccumulator(LeqAccumulator):
@@ -229,15 +260,16 @@ class LEAccumulator(LeqAccumulator):
 
 
 class LEMovingMeter(LeqMovingMeter):
-    """Rolling sound exposure level over a window of ``t`` seconds.
+    """Rolling sound exposure level over exactly ``round(t·fs)`` samples.
 
-    ``read()`` returns ``mean_sq * t`` (Pa²·s) so that ``plugin.read_db()``
-    gives LE_window = Leq_window + 10·log₁₀(T_window / T₀) in dB (T₀ = 1 s).
+    ``read()`` returns ``Σp² / samplerate`` (Pa²·s) over the window so that
+    ``plugin.read_db()`` gives LE_window = Leq_window + 10·log₁₀(T_window / T₀)
+    in dB (T₀ = 1 s).
     """
 
     def read(self) -> np.ndarray:
-        # mean_sq * t = E_window (Pa²·s); read_db divides by p₀² → LE_window.
-        return self._fifo.map(np.mean) * self._t
+        # window sum / samplerate = E_window (Pa²·s); read_db divides by p₀² → LE_window.
+        return self._window() / self.samplerate
 
 
 TMeter = TypeVar("TMeter", bound=Meter)
