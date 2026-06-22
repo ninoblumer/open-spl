@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 from slm.frequency_weighting import PluginAWeighting
+from slm.time_weighting import PluginSquare
 from slm.meter import LeqAccumulator, LEAccumulator
 from slm.constants import REFERENCE_PRESSURE
 
@@ -69,14 +70,15 @@ def _measure(signal: np.ndarray) -> tuple[float, float, int]:
     assert len(signal) % BLOCKSIZE == 0, "signal must be a multiple of BLOCKSIZE"
     bus    = _mock_bus()
     plugin = PluginAWeighting(input=bus)
-    leq_m  = plugin.create_meter(LeqAccumulator, name="leq")
-    le_m   = plugin.create_meter(LEAccumulator,  name="le")
+    sq     = PluginSquare(input=plugin)      # Leq/LE meters consume Pa²
+    leq_m  = sq.create_meter(LeqAccumulator, name="leq")
+    le_m   = sq.create_meter(LEAccumulator,  name="le")
 
     for start in range(0, len(signal), BLOCKSIZE):
         plugin.process(signal[start : start + BLOCKSIZE][np.newaxis, :])
 
-    l_aeq = float(plugin.read_db("leq")[0])
-    l_ae  = float(plugin.read_db("le")[0])
+    l_aeq = float(sq.read_db("leq")[0])
+    l_ae  = float(sq.read_db("le")[0])
     return l_aeq, l_ae, len(signal)
 
 
@@ -92,10 +94,11 @@ def _measure_leq_window(signal: np.ndarray) -> float:
     )
     bus    = _mock_bus(blocksize=WINDOW_BLOCKSIZE)
     plugin = PluginAWeighting(input=bus)
-    plugin.create_meter(LeqAccumulator, name="leq")
+    sq     = PluginSquare(input=plugin)      # Leq meter consumes Pa²
+    sq.create_meter(LeqAccumulator, name="leq")
     for start in range(0, len(signal), WINDOW_BLOCKSIZE):
         plugin.process(signal[start : start + WINDOW_BLOCKSIZE][np.newaxis, :])
-    return float(plugin.read_db("leq")[0])
+    return float(sq.read_db("leq")[0])
 
 
 # ---------------------------------------------------------------------------

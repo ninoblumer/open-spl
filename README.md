@@ -217,8 +217,9 @@ Reporter ◄──────────────────────�
 - **`Bus`** — one frequency weighting + a chain of downstream plugins and meters
 - **`PluginAWeighting` / `PluginCWeighting` / `PluginZWeighting`** — IIR frequency-weighting filters
 - **`PluginFastTimeWeighting` / `PluginSlowTimeWeighting`** — exponential time-weighting filters
+- **`PluginSquare`** — instantaneous squaring (Pa → Pa²); the squaring stage for `eq`/`E`/peak chains, so every meter consumes Pa²
 - **`PluginOctaveBand`** — arbitrary N/M-octave filter bank; outputs N channels
-- **`LeqAccumulator` / `MaxAccumulator`** — whole-file/stream integrating meters
+- **`LeqAccumulator` / `MaxAccumulator`** — whole-file/stream integrating meters (Pa² input)
 - **`LeqMovingMeter` / `MaxMovingMeter`** — sliding-window meters
 - **`Reporter`** — a sink: columns registered via `add_columns` are sampled when `engine.on_record` fires, then written as CSV
 

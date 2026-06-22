@@ -306,8 +306,10 @@ def plan_chain(spec: MetricSpec) -> ChainPlan:
 
     - always a ``freq_weighting`` node (the bus);
     - then an optional ``band`` node for per-band metrics;
-    - then an optional ``time_weighting`` node (F/S/I) or ``square`` node (bare
-      metrics, which need Pa² input);
+    - then a ``time_weighting`` node (F/S/I) when the metric has a time-weighting
+      letter, otherwise a ``square`` node — every meter consumes Pa², so the
+      pressure is squared exactly once, either by the time-weighting filter or
+      by ``PluginSquare``.
 
     with the meter attached to whichever node ends up last.
     """
@@ -328,7 +330,8 @@ def plan_chain(spec: MetricSpec) -> ChainPlan:
                 weighting=w, bands=spec.bands, bands_per_oct=spec.bands_per_oct,
                 time_weighting=spec.time_weighting,
             ))
-        elif spec.measure == "last":
+        else:
+            # eq/E/last on a band: square the band output so the meter gets Pa².
             nodes.append(NodeReq(
                 kind="square", key=("band_sq", w, spec.bands, spec.bands_per_oct),
                 weighting=w, bands=spec.bands, bands_per_oct=spec.bands_per_oct,
@@ -338,7 +341,8 @@ def plan_chain(spec: MetricSpec) -> ChainPlan:
             kind="time_weighting", key=("tw", w, spec.time_weighting),
             weighting=w, time_weighting=spec.time_weighting,
         ))
-    elif spec.measure == "last":
+    else:
+        # eq/E/last broadband: square the bus output so the meter gets Pa².
         nodes.append(NodeReq(kind="square", key=("sq", w), weighting=w))
 
     moving = spec.window_is_dt or spec.window_seconds is not None

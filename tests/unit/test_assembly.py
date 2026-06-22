@@ -188,18 +188,18 @@ class TestBuildChainStructure:
         assert set(engine._busses.keys()) == {"A", "C"}
 
     def test_leq_and_leq_dt_share_freq_weighting(self, tmp_path):
-        """LAeq + LAeq_dt → both meters on freq_weighting, no extra TW plugin."""
+        """LAeq + LAeq_dt → both meters share one PluginSquare on the A bus."""
         engine, _ = _run_chain(tmp_path, ["LAeq", "LAeq_dt"])
         bus = engine._busses["A"]
         freq_w = bus.frequency_weighting
-        assert "LAeq" in freq_w.meters
-        assert "LAeq_dt" in freq_w.meters
-        assert isinstance(freq_w.meters["LAeq"], LeqAccumulator)
-        assert isinstance(freq_w.meters["LAeq_dt"], LeqMovingMeter)
-        # Only the frequency-weighting plugin itself — no time-weighting plugin
-        # (bus.plugins includes the frequency_weighting; no additional plugins)
+        # The only extra plugin is the shared PluginSquare; both meters live on it.
         non_fw = [p for p in bus.plugins if p is not freq_w]
-        assert len(non_fw) == 0
+        assert len(non_fw) == 1
+        sq = non_fw[0]
+        assert isinstance(sq, PluginSquare)
+        assert sq.input is freq_w
+        assert isinstance(sq.meters["LAeq"], LeqAccumulator)
+        assert isinstance(sq.meters["LAeq_dt"], LeqMovingMeter)
 
     def test_time_weighting_plugin_created_for_max(self, tmp_path):
         """LAFmax → one time-weighting plugin on the A bus."""
@@ -224,9 +224,8 @@ class TestBuildChainStructure:
         """LZeq:bands:63-8000 → one PluginOctaveBand on the Z bus."""
         engine, _ = _run_chain(tmp_path, ["LZeq:bands:63-8000"])
         bus = engine._busses["Z"]
-        non_fw = [p for p in bus.plugins if p is not bus.frequency_weighting]
-        assert len(non_fw) == 1
-        assert isinstance(non_fw[0], PluginOctaveBand)
+        obs = [p for p in bus.plugins if isinstance(p, PluginOctaveBand)]
+        assert len(obs) == 1
 
     def test_octave_band_width_equals_n_bands(self, tmp_path):
         """PluginOctaveBand.width must equal n_bands (set in __init__, not patched)."""
@@ -250,9 +249,11 @@ class TestBuildChainStructure:
         bus = engine._busses["A"]
         obs = [p for p in bus.plugins if isinstance(p, PluginOctaveBand)]
         assert len(obs) == 1
-        ob = obs[0]
-        assert "LAeq:bands:63-8000" in ob.meters
-        assert "LAeq_dt:bands:63-8000" in ob.meters
+        # Both band-eq meters share the single PluginSquare downstream of the band.
+        sq = next(p for p in bus.plugins if isinstance(p, PluginSquare))
+        assert sq.input is obs[0]
+        assert "LAeq:bands:63-8000" in sq.meters
+        assert "LAeq_dt:bands:63-8000" in sq.meters
 
     def test_reporter_broadband_columns_for_broadband_metrics(self, tmp_path):
         """LAeq + LAFmax → two entries in broadband_columns."""
@@ -271,20 +272,20 @@ class TestBuildChainStructure:
         engine, _ = _run_chain(tmp_path, ["LAeq", "LAE"])
         bus = engine._busses["A"]
         freq_w = bus.frequency_weighting
-        assert "LAeq" in freq_w.meters
-        assert "LAE" in freq_w.meters
-        assert isinstance(freq_w.meters["LAE"], LEAccumulator)
-        # No extra plugins beyond frequency weighting
+        # LAeq + LAE share the single PluginSquare on the A bus.
         non_fw = [p for p in bus.plugins if p is not freq_w]
-        assert len(non_fw) == 0
+        assert len(non_fw) == 1
+        sq = non_fw[0]
+        assert isinstance(sq, PluginSquare)
+        assert isinstance(sq.meters["LAeq"], LeqAccumulator)
+        assert isinstance(sq.meters["LAE"], LEAccumulator)
 
     def test_lae_dt_creates_le_moving_meter(self, tmp_path):
         """LAE_dt creates LEMovingMeter on freq-weighting plugin."""
         engine, _ = _run_chain(tmp_path, ["LAE_dt"])
         bus = engine._busses["A"]
-        freq_w = bus.frequency_weighting
-        assert "LAE_dt" in freq_w.meters
-        assert isinstance(freq_w.meters["LAE_dt"], LEMovingMeter)
+        sq = next(p for p in bus.plugins if isinstance(p, PluginSquare))
+        assert isinstance(sq.meters["LAE_dt"], LEMovingMeter)
 
     # -- band + time-weighting chain (regression: previously NaN) -----------
 
@@ -521,12 +522,12 @@ def _build_only(tmp_path: Path, names: list[str]):
 class TestPlanChain:
 
     @pytest.mark.parametrize("name,kinds", [
-        ("LAeq",                    ["freq_weighting"]),
-        ("LAeq_dt",                 ["freq_weighting"]),
+        ("LAeq",                    ["freq_weighting", "square"]),          # eq, no TW → square
+        ("LAeq_dt",                 ["freq_weighting", "square"]),
         ("LAFmax",                  ["freq_weighting", "time_weighting"]),
         ("LAF",                     ["freq_weighting", "time_weighting"]),  # bare + TW → TW node
         ("LA",                      ["freq_weighting", "square"]),          # bare, no TW → square
-        ("LZeq:bands:63-8000",      ["freq_weighting", "band"]),
+        ("LZeq:bands:63-8000",      ["freq_weighting", "band", "square"]),
         ("LZFmax:bands:63-8000",    ["freq_weighting", "band", "time_weighting"]),
         ("LZ:bands:63-8000",        ["freq_weighting", "band", "square"]),  # bare per-band → square
     ])
@@ -628,7 +629,9 @@ class TestAssembleEngine:
         controller = _file_controller(tmp_path)
         engine, _ = assemble_engine([parse_metric("LAeq")], controller, dt=10.0)
         engine.run()   # no on_record wired → must not raise
-        val = engine._busses["A"].frequency_weighting.read_db("LAeq")
+        bus = engine._busses["A"]
+        sq = next(p for p in bus.plugins if isinstance(p, PluginSquare))
+        val = sq.read_db("LAeq")
         assert np.isfinite(val)
 
     def test_reporter_wiring_populates_rows(self, tmp_path):

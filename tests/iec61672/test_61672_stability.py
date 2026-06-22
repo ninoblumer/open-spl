@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 from slm.frequency_weighting import PluginAWeighting
+from slm.time_weighting import PluginSquare
 from slm.meter import LeqAccumulator
 from slm.constants import REFERENCE_PRESSURE
 
@@ -47,7 +48,8 @@ def _leq_over_window(freq_hz: float, amplitude: float, duration_s: float) -> flo
     """Measure A-weighted Leq of a sine over *duration_s* seconds."""
     bus    = _mock_bus()
     plugin = PluginAWeighting(input=bus)
-    leq_m  = plugin.create_meter(LeqAccumulator, name="leq")
+    sq     = PluginSquare(input=plugin)      # Leq meter consumes Pa²
+    leq_m  = sq.create_meter(LeqAccumulator, name="leq")
 
     n_total = (int(duration_s * SAMPLERATE) // BLOCKSIZE) * BLOCKSIZE
     for i in range(n_total // BLOCKSIZE):
@@ -55,7 +57,7 @@ def _leq_over_window(freq_hz: float, amplitude: float, duration_s: float) -> flo
         block = amplitude * np.sin(2.0 * np.pi * freq_hz * t)
         plugin.process(block[np.newaxis, :])
 
-    return float(plugin.read_db("leq")[0])
+    return float(sq.read_db("leq")[0])
 
 
 @pytest.mark.slow

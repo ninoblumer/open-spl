@@ -16,7 +16,7 @@ import types
 import numpy as np
 import pytest
 
-from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
+from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting, PluginSquare
 from slm.frequency_weighting import PluginZWeighting
 from slm.meter import LeqAccumulator
 
@@ -148,9 +148,10 @@ class TestFvsSteadyState:
         bus      = _mock_bus(samplerate=samplerate, blocksize=blocksize)
         plugin_f = PluginFastTimeWeighting(input=bus)
         plugin_s = PluginSlowTimeWeighting(input=bus)
-        # Pure passthrough (Z) carrying a linear-Leq accumulator for L_Aeq.
+        # Pure passthrough (Z) → square → linear-Leq accumulator for L_Aeq.
         plugin_z = PluginZWeighting(input=bus)
-        plugin_z.create_meter(LeqAccumulator, name="leq")
+        sq_z = PluginSquare(input=plugin_z)
+        sq_z.create_meter(LeqAccumulator, name="leq")
 
         _process_steady(plugin_f, freq_hz, n_blocks, samplerate, blocksize)
         _process_steady(plugin_s, freq_hz, n_blocks, samplerate, blocksize)
@@ -165,7 +166,7 @@ class TestFvsSteadyState:
         # L_Aeq vs L_F as a direct ratio: y_f is the F time-weighted mean square
         # (Pa²) and the Leq accumulator's read_lin is also mean square (Pa²), so
         # the reference pressure cancels.
-        leq_meansq = float(plugin_z.read_lin("leq")[0])
+        leq_meansq = float(sq_z.read_lin("leq")[0])
         diff_eq = abs(10.0 * np.log10(leq_meansq / y_f))
 
         if report:

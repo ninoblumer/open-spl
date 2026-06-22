@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 from slm.frequency_weighting import PluginAWeighting
+from slm.time_weighting import PluginSquare
 from slm.meter import LeqAccumulator
 from slm.constants import REFERENCE_PRESSURE
 
@@ -54,12 +55,13 @@ def _measure_leq(amplitude: float, duration_s: float = 1.0) -> float:
 
     bus    = _mock_bus()
     plugin = PluginAWeighting(input=bus)
-    leq_m  = plugin.create_meter(LeqAccumulator, name="leq")
+    sq     = PluginSquare(input=plugin)      # Leq meter consumes Pa²
+    leq_m  = sq.create_meter(LeqAccumulator, name="leq")
 
     for start in range(0, n, BLOCKSIZE):
         plugin.process(signal[start : start + BLOCKSIZE][np.newaxis, :])
 
-    return float(plugin.read_db("leq")[0])
+    return float(sq.read_db("leq")[0])
 
 
 def _input_level_db(amplitude: float) -> float:

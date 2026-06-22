@@ -97,6 +97,7 @@ def calibrate_sensitivity(
     """
     from slm.engine import Engine
     from slm.frequency_weighting import PluginZWeighting, PluginBandpass
+    from slm.time_weighting import PluginSquare
     from slm.meter import LeqAccumulator, LeqMovingMeter
 
     use_stability = stability_window is not None
@@ -106,17 +107,20 @@ def calibrate_sensitivity(
     bus = engine.add_bus("cal", PluginZWeighting)
     bp = PluginBandpass(fc=cal_freq, input=bus.frequency_weighting, width=1, bus=bus)
     bus.add_plugin(bp)
-    bp.create_meter(LeqAccumulator, name="leq")
+    # Square the bandpass output so the Leq meters get Pa² (they no longer square).
+    sq = PluginSquare(input=bp, width=1)
+    bus.add_plugin(sq)
+    sq.create_meter(LeqAccumulator, name="leq")
 
     if use_stability:
-        bp.create_meter(LeqMovingMeter, name="leq_moving", t=1.0)
+        sq.create_meter(LeqMovingMeter, name="leq_moving", t=1.0)
         engine.on_record = _StabilityMonitor(
-            bp, "leq_moving", controller,
+            sq, "leq_moving", controller,
             window=stability_window, threshold=stability_threshold, dt=dt,
         )
 
     engine.run()
 
-    mean_sq = bp.read_lin("leq")[0]
+    mean_sq = sq.read_lin("leq")[0]
     rms = mean_sq ** 0.5
     return rms / (REFERENCE_PRESSURE * 10 ** (cal_level / 20))

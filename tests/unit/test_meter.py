@@ -23,9 +23,9 @@ class TestLeqAccumulator:
     def test_single_block(self):
         p = _parent()
         m = LeqAccumulator(name="leq", parent=p)
-        block = np.array([[1.0, 2.0, 3.0, 4.0]])  # shape (1, 4)
+        block = np.array([[1.0, 2.0, 3.0, 4.0]])  # shape (1, 4), already Pa²
         m.process(block)
-        expected = np.mean(block ** 2)
+        expected = np.mean(block)
         np.testing.assert_allclose(m.read(), [expected])
 
     def test_accumulates_over_two_blocks(self):
@@ -35,7 +35,7 @@ class TestLeqAccumulator:
         b2 = np.ones((1, 4)) * 4.0
         m.process(b1)
         m.process(b2)
-        expected = (np.sum(b1 ** 2) + np.sum(b2 ** 2)) / 8
+        expected = (np.sum(b1) + np.sum(b2)) / 8
         np.testing.assert_allclose(m.read(), [expected])
 
     def test_reset(self):
@@ -53,7 +53,7 @@ class TestLeqAccumulator:
         m.reset()
         block = np.array([[3.0, 3.0, 3.0, 3.0]])
         m.process(block)
-        np.testing.assert_allclose(m.read(), [9.0])  # 3²=9
+        np.testing.assert_allclose(m.read(), [3.0])  # mean of Pa² input
 
     def test_multichannel(self):
         p = _parent(width=2)
@@ -61,7 +61,7 @@ class TestLeqAccumulator:
         block = np.array([[1.0, 1.0, 1.0, 1.0],
                           [2.0, 2.0, 2.0, 2.0]])
         m.process(block)
-        np.testing.assert_allclose(m.read(), [1.0, 4.0])
+        np.testing.assert_allclose(m.read(), [1.0, 2.0])
 
     def test_read_before_process_returns_zero(self):
         p = _parent()
@@ -153,11 +153,11 @@ class TestLeqMovingMeter:
         m = LeqMovingMeter(name="leq", parent=p, t=1.0)
         # FIFO holds 10 blocks (t=1.0s at 48000Hz / 4800)
         for _ in range(10):
-            m.process(np.ones((1, 4800)) * 2.0)  # mean sq = 4.0
-        np.testing.assert_allclose(m.read(), [4.0])
-        # Push blocks with mean_sq=1.0 until FIFO rotates fully
+            m.process(np.ones((1, 4800)) * 2.0)  # mean of Pa² = 2.0
+        np.testing.assert_allclose(m.read(), [2.0])
+        # Push blocks with mean=1.0 until FIFO rotates fully
         for _ in range(10):
-            m.process(np.ones((1, 4800)) * 1.0)  # mean sq = 1.0
+            m.process(np.ones((1, 4800)) * 1.0)  # mean of Pa² = 1.0
         np.testing.assert_allclose(m.read(), [1.0])
 
 
@@ -258,10 +258,11 @@ class TestMeterGetChain:
         ctrl = NoiseController(samplerate=48_000, blocksize=1_024)
         ctrl.set_sensitivity(1.0, unit="V")
         engine = Engine(ctrl, dt=1.0)
+        from slm.time_weighting import PluginSquare
         build_chain([parse_metric("LAeq")], engine)
         bus = engine._busses["A"]
-        fw = bus.frequency_weighting
-        meter = fw.meters["LAeq"]
+        sq = next(p for p in bus.plugins if isinstance(p, PluginSquare))
+        meter = sq.meters["LAeq"]
         chain = meter.get_chain()
         assert meter in chain
         assert bus in chain

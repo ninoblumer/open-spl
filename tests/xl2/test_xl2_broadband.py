@@ -126,7 +126,9 @@ def compute_interval_leq(meas, weighting_cls, dt=1.0, blocksize=4800):
     engine = Engine(controller, dt=1e9)          # dt=1e9 s → log_block never fires
     bus = engine.add_bus("bus", weighting_cls)
     freq_w = bus.frequency_weighting
-    meter = freq_w.add_meter(LeqAccumulator(name="leq", parent=freq_w))
+    # Leq meters consume Pa²; square the weighting output for them.
+    sq = bus.add_plugin(PluginSquare(input=freq_w, zero_zi=True))
+    meter = sq.create_meter(LeqAccumulator, name="leq")
 
     interval_samples = int(dt * controller.samplerate)
     results = []
@@ -140,7 +142,7 @@ def compute_interval_leq(meas, weighting_cls, dt=1.0, blocksize=4800):
         bus.process(block.T)
         n_acc += blocksize
         if n_acc >= interval_samples:
-            results.append(freq_w.read_db("leq"))
+            results.append(sq.read_db("leq"))
             meter.reset()
             n_acc -= interval_samples
 
@@ -196,11 +198,6 @@ class TestSLM001IntervalLeq:
         ref = meas_001.log_series("LAeq_dt")
         assert len(result) == len(ref)
         # The SLM_001 signal is a 10-second frequency sweep that repeats 3 times.
-        # Seconds at the sweep-cycle reset (indices 9, 10, 19, 20, 29 in 0-based) show
-        # errors up to ~10 dB vs the XL2 log.  The most likely cause is a small (~0.4 s)
-        # timing offset between the XL2's LAeq_dt reference window and the WAV recording
-        # start.  For the 25 non-boundary seconds, where the A-weighted level changes
-        # slowly, our computation agrees with the XL2 within ±0.13 dB.
         boundary = {9, 10, 19, 20, 29}
         stable = [i for i in range(len(result)) if i not in boundary]
         assert np.all(np.abs(result[stable] - ref[stable]) <= TOLERANCE_DB)

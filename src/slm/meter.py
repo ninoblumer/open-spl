@@ -56,9 +56,9 @@ class AccumulatingMeter(Meter, ABC):
 class LeqAccumulator(AccumulatingMeter):
     """Leq accumulator.
 
-    Attaches to a frequency-weighting output (linear Pa).  Squares the input
-    internally.  ``read()`` returns mean square pressure (Pa²) so that
-    ``plugin.read_db()`` gives the correct Leq in dB SPL.
+    Attaches to a squared (Pa²) source — a ``PluginSquare`` or a time-weighting
+    output — so the meter never squares.  ``read()`` returns mean square
+    pressure (Pa²) so that ``plugin.read_db()`` gives the correct Leq in dB SPL.
     """
 
     def __init__(self, **kwargs):
@@ -67,7 +67,7 @@ class LeqAccumulator(AccumulatingMeter):
         self._n_samples = 0
 
     def process(self, block: np.ndarray):
-        self._sum_sq += np.sum(block ** 2, axis=-1)
+        self._sum_sq += np.sum(block, axis=-1)
         self._n_samples += block.shape[-1]
 
     def read(self) -> np.ndarray:
@@ -171,13 +171,13 @@ class MovingMeter(Meter, ABC):
 class LeqMovingMeter(MovingMeter):
     """Rolling energy-mean Leq over a window of ``t`` seconds.
 
-    Attaches to a frequency-weighting output (linear Pa).  Squares internally.
-    Each FIFO slot stores the mean square for one block; ``read()`` returns
-    the mean of those values — the correct energy mean over the window.
+    Attaches to a squared (Pa²) source — a ``PluginSquare`` — so the meter never
+    squares.  Each FIFO slot stores the mean square for one block; ``read()``
+    returns the mean of those values — the energy mean over the window.
     """
 
     def process(self, block: np.ndarray):
-        self._fifo.push(np.sum(block ** 2, axis=-1) / block.shape[-1])
+        self._fifo.push(np.sum(block, axis=-1) / block.shape[-1])
 
     def read(self) -> np.ndarray:
         return self._fifo.map(np.mean)
@@ -217,7 +217,7 @@ class LastMovingMeter(MovingMeter):
 class LEAccumulator(LeqAccumulator):
     """Sound exposure level (LE) accumulator.
 
-    Attaches to a frequency-weighting output (linear Pa). Squares internally.
+    Attaches to a squared (Pa²) source — a ``PluginSquare``.
     ``read()`` returns ``sum_sq / samplerate`` (Pa²·s) so that
     ``plugin.read_db()`` gives LE = Leq + 10·log₁₀(T / T₀) in dB (T₀ = 1 s).
     Equivalent to: 10·log₁₀(Σp² / samplerate / p₀²).

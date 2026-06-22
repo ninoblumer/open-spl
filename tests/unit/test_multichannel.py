@@ -69,10 +69,13 @@ class TestFileControllerStereo:
             engine_stereo = _run(stereo, ["LAeq"])
         engine_mono = _run(mono_ch0, ["LAeq"])
 
+        from slm.time_weighting import PluginSquare
         bus_s = engine_stereo._busses["A"]
         bus_m = engine_mono._busses["A"]
-        result_stereo = bus_s.frequency_weighting.read_db("LAeq")
-        result_mono   = bus_m.frequency_weighting.read_db("LAeq")
+        sq_s = next(p for p in bus_s.plugins if isinstance(p, PluginSquare))
+        sq_m = next(p for p in bus_m.plugins if isinstance(p, PluginSquare))
+        result_stereo = sq_s.read_db("LAeq")
+        result_mono   = sq_m.read_db("LAeq")
         assert result_stereo == pytest.approx(result_mono, abs=0.01)
 
 
