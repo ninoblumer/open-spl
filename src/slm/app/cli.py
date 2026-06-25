@@ -39,6 +39,36 @@ def sensitivity_from_dbv(dbv: float) -> float:
     return 10 ** (dbv / 20)
 
 
+def parse_duration(text: str) -> float:
+    """Parse a colon-separated duration into seconds.
+
+    Accepts ``hh:mm:ss``, ``mm:ss``, or ``ss``; each field may be fractional.
+    The last field is seconds, the next minutes, the next hours::
+
+        parse_duration("90")        -> 90.0
+        parse_duration("1:30")      -> 90.0
+        parse_duration("01:02:03")  -> 3723.0
+
+    Raises :class:`ValueError` if the text is empty, has more than three fields,
+    contains a non-numeric or negative field, or sums to a non-positive value.
+    """
+    fields = text.strip().split(":")
+    if not text.strip() or len(fields) > 3:
+        raise ValueError(f"Invalid duration: {text!r}")
+    seconds = 0.0
+    for field in fields:
+        try:
+            value = float(field)
+        except ValueError:
+            raise ValueError(f"Invalid duration: {text!r}") from None
+        if value < 0:
+            raise ValueError(f"Invalid duration: {text!r}")
+        seconds = seconds * 60 + value
+    if seconds <= 0:
+        raise ValueError(f"Invalid duration: {text!r}")
+    return seconds
+
+
 def _fmt_device_table(devices: list[dict]) -> str:
     """Format a list of audio input devices as a wrapped-name table string."""
     import textwrap
@@ -142,6 +172,7 @@ def _build_and_run_engine(
     config: "SLMConfig",
     print_to_console: bool = False,
     display_mode: str = "plain",
+    duration: float | None = None,
 ) -> None:
     """Build and run the engine for *controller*; write results on exit.
 
@@ -167,7 +198,7 @@ def _build_and_run_engine(
     try:
         with high_priority(), controller:   # controller.__enter__/__exit__ → start/stop
             try:
-                engine.run()
+                engine.run(duration=duration, warmup=config.warmup)
             except KeyboardInterrupt:
                 print("\nMeasurement interrupted.")
     finally:
@@ -189,15 +220,21 @@ def run_measurement(
     blocksize: int = 1024,
     display_mode: str = "plain",
     realtime: bool = False,
+    duration: float | None = None,
 ) -> None:
-    """Parse *config.metrics*, build the plugin chain, run the engine, write results."""
+    """Parse *config.metrics*, build the plugin chain, run the engine, write results.
+
+    *duration* (seconds), if given, stops the run after that much signal has been
+    processed (rounded up to the next whole block); otherwise the whole file is read.
+    """
     if sensitivity_v <= 0:
         raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
     from slm.io.file_controller import FileController
 
     controller = FileController(str(wav_path), blocksize=blocksize, realtime=realtime)
     controller.set_sensitivity(sensitivity_v, unit="V")
-    _build_and_run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
+    _build_and_run_engine(controller, config, print_to_console=print_to_console,
+                          display_mode=display_mode, duration=duration)
 
 
 # ---------------------------------------------------------------------------
@@ -211,11 +248,15 @@ def run_noise_measurement(
     blocksize: int = Controller.DEFAULT_BLOCKSIZE,
     print_to_console: bool = False,
     display_mode: str = "plain",
+    duration: float | None = None,
 ) -> None:
     """Run a measurement driven by white-noise input (no audio hardware required).
 
     Uses :class:`~slm.io.noise_controller.NoiseController` in real-time mode.
     Useful for testing the processing pipeline and the status display.
+
+    *duration* (seconds), if given, stops the run after that much signal has been
+    processed (rounded up to the next whole block); otherwise it runs until Ctrl+C.
     """
     if sensitivity_v <= 0:
         raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
@@ -232,7 +273,8 @@ def run_noise_measurement(
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-    _build_and_run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
+    _build_and_run_engine(controller, config, print_to_console=print_to_console,
+                          display_mode=display_mode, duration=duration)
 
 
 def run_realtime_measurement(
@@ -243,11 +285,14 @@ def run_realtime_measurement(
     blocksize: int = Controller.DEFAULT_BLOCKSIZE,
     print_to_console: bool = False,
     display_mode: str = "plain",
+    duration: float | None = None,
 ) -> None:
     """Start a live measurement from a real-time audio input device.
 
-    The engine runs until ``KeyboardInterrupt`` (Ctrl+C), at which point the
-    stream is stopped and results are written to *config.output*.
+    The engine runs until *duration* seconds have elapsed (rounded up to the next
+    whole block) or until ``KeyboardInterrupt`` (Ctrl+C), at which point the stream
+    is stopped and results are written to *config.output*.  If *duration* is None,
+    the run is unbounded and stops only on Ctrl+C.
     """
     if sensitivity_v <= 0:
         raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
@@ -263,7 +308,8 @@ def run_realtime_measurement(
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-    _build_and_run_engine(controller, config, print_to_console=print_to_console, display_mode=display_mode)
+    _build_and_run_engine(controller, config, print_to_console=print_to_console,
+                          display_mode=display_mode, duration=duration)
 
 
 # ---------------------------------------------------------------------------
@@ -273,8 +319,8 @@ def run_realtime_measurement(
 class SLMShell(cmd.Cmd):
     """Interactive SLM REPL.
 
-    Commands: add, remove, file, sensitivity, calibrate, output, dt,
-              show, save, load, start, display, tree, inspect, exit/quit/EOF.
+    Commands: add, remove, file, sensitivity, calibrate, output, name, warmup,
+              dt, show, save, load, start, display, tree, inspect, exit/quit/EOF.
     """
 
     intro = (
@@ -521,16 +567,64 @@ Use this when you have a physical calibrator and a recording of it; use
     # ------------------------------------------------------------------
 
     def do_output(self, arg: str) -> None:
-        """output PATH — set the output file base path."""
-        path = arg.strip()
-        if not path:
-            print("Usage: output PATH")
+        """output DIR — set the directory where result files are written.
+
+The measurement name (see `name`) is kept; files are written to
+DIR/NAME_report.csv etc.
+"""
+        directory = arg.strip()
+        if not directory:
+            print(f"Output dir: {Path(self._config.output).parent}")
             return
-        self._config.output = path
-        print(f"Output: {path}")
+        name = Path(self._config.output).name
+        self._config.output = str(Path(directory) / name)
+        print(f"Output dir: {directory}")
+
+    def do_name(self, arg: str) -> None:
+        """name NAME — set the measurement name (the output file stem).
+
+The output directory (see `output`) is kept; files are written to
+DIR/NAME_report.csv etc.
+"""
+        name = arg.strip()
+        if not name:
+            print(f"Measurement: {Path(self._config.output).name}")
+            return
+        directory = Path(self._config.output).parent
+        self._config.output = str(directory / name)
+        print(f"Measurement: {name}")
+        print(f"  -> {self._config.output}_report.csv")
+
+    def do_warmup(self, arg: str) -> None:
+        """warmup SECONDS — settle the chain for SECONDS before measuring (default 0).
+
+During warm-up the signal is processed but not logged; the meters are then
+reset so the accumulators (Leq, max/min) start from a settled state rather
+than from the initial filter transient.  Set 0 to disable.
+"""
+        arg = arg.strip()
+        if not arg:
+            print(f"Warm-up: {self._config.warmup} s")
+            return
+        try:
+            warmup = float(arg)
+            if warmup < 0:
+                raise ValueError
+        except ValueError:
+            print(f"Invalid warmup: {arg!r}  (must be a non-negative number)")
+            return
+        self._config.warmup = warmup
+        print(f"Warm-up: {warmup} s")
 
     def do_dt(self, arg: str) -> None:
-        """dt SECONDS — set the logging interval."""
+        """dt SECONDS — set the logging interval.
+
+Note: log rows are written on block edges, so the cadence is quantized to the
+block duration (blocksize/fs).  A dt that is an exact integer multiple of the
+block duration logs at the requested interval; otherwise each interval is
+rounded up to the next block edge and the effective dt drifts slightly above
+the value set here.
+"""
         try:
             self._config.dt = float(arg.strip())
             print(f"dt: {self._config.dt} s")
@@ -573,11 +667,14 @@ Examples:
             source = f"device: {self._device!r}"
         else:
             source = "(not set)"
+        out_path = Path(self._config.output)
         print(f"  Source:      {source}")
         print(f"  Sensitivity: {'(not set)' if self._sensitivity_v is None else self._sensitivity_v}")
         print(f"  dt:          {self._config.dt} s")
+        print(f"  Warm-up:     {self._config.warmup} s")
         print(f"  Queue max:   {self._config.queue_maxsize} blocks")
-        print(f"  Output:      {self._config.output}")
+        print(f"  Output dir:  {out_path.parent}")
+        print(f"  Name:        {out_path.name}")
         print(f"  Metrics:     {self._config.metrics or '(none)'}")
         print(f"  Display:     {self._display_mode}")
         print(f"  Realtime:    {'on' if self._realtime else 'off'}")
@@ -769,17 +866,38 @@ When disabled (default), the file is processed as fast as possible.
             "  2. sensitivity ...    — set sensitivity (or: calibrate)\n"
             "  3. add METRIC ...     — add one or more metrics\n"
             "  4. dt SECONDS         — set logging interval (default 1.0 s)\n"
-            "  5. output PATH        — set output base path\n"
-            "  6. start              — run the measurement\n"
-            "  7. save FILE.toml     — save config for next time"
+            "  5. output DIR         — set output directory\n"
+            "  6. name NAME          — set measurement name (output file stem)\n"
+            "  7. warmup SECONDS     — optional settle time before measuring\n"
+            "  8. start [DURATION]   — run the measurement (optionally fixed-length)\n"
+            "  9. save FILE.toml     — save config for next time"
         )
 
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
 
-    def do_start(self, _: str) -> None:
-        """start — run the measurement with the current configuration."""
+    def do_start(self, arg: str) -> None:
+        """start [DURATION] — run the measurement with the current configuration.
+
+DURATION, if given, runs a fixed-length measurement and stops automatically.
+It is accepted as hh:mm:ss, mm:ss, or just ss (fields may be fractional):
+
+  start            run until end of file / Ctrl+C
+  start 30         run for 30 seconds
+  start 1:30       run for 1 minute 30 seconds
+  start 01:00:00   run for 1 hour
+
+The run stops on a block edge, so the measured length is rounded up to the
+next whole block (blocksize/fs).
+"""
+        duration: float | None = None
+        if arg.strip():
+            try:
+                duration = parse_duration(arg)
+            except ValueError as exc:
+                print(exc)
+                return
         if not self._wav_path and self._device is None and not self._generator_mode:
             print("No source set.  Use: file PATH  |  device INDEX  |  generator")
             return
@@ -795,6 +913,7 @@ When disabled (default), the file is processed as fast as possible.
                 self._config,
                 print_to_console=True,
                 display_mode=self._display_mode,
+                duration=duration,
             )
         elif self._wav_path:
             run_measurement(
@@ -804,6 +923,7 @@ When disabled (default), the file is processed as fast as possible.
                 print_to_console=True,
                 display_mode=self._display_mode,
                 realtime=self._realtime,
+                duration=duration,
             )
         else:
             run_realtime_measurement(
@@ -812,6 +932,7 @@ When disabled (default), the file is processed as fast as possible.
                 device=self._device,
                 print_to_console=True,
                 display_mode=self._display_mode,
+                duration=duration,
             )
 
     # ------------------------------------------------------------------

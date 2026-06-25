@@ -85,6 +85,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dt", type=float, default=None, metavar="SECONDS",
         help="Logging interval in seconds (default: 1.0)",
     )
+    parser.add_argument(
+        "--duration", default=None, metavar="HH:MM:SS",
+        help="Fixed measurement length as hh:mm:ss, mm:ss, or ss (fields may be "
+             "fractional). Stops automatically on the next block edge. Default: "
+             "run until end of file / Ctrl+C.",
+    )
+    parser.add_argument(
+        "--warmup", type=float, default=None, metavar="SECONDS",
+        help="Settle the processing chain for SECONDS before measuring; the meters "
+             "are reset afterwards so accumulators ignore the start-up transient "
+             "(default: 0, disabled).",
+    )
 
     parser.add_argument(
         "--realtime", "-r", action="store_true",
@@ -142,6 +154,9 @@ def main() -> None:
     if args.generator and not (args.measure or args.config):
         parser.error("--generator requires --measure METRIC [...] or --config FILE.toml")
 
+    if args.warmup is not None and args.warmup < 0:
+        parser.error("--warmup must be non-negative")
+
     # ------------------------------------------------------------------ #
     # Interactive REPL                                                     #
     # ------------------------------------------------------------------ #
@@ -181,6 +196,8 @@ def main() -> None:
                 config.output = args.output
             if args.dt is not None:
                 config.dt = args.dt
+            if args.warmup is not None:
+                config.warmup = args.warmup
             if args.queue_maxsize is not None:
                 config.queue_maxsize = args.queue_maxsize
         else:
@@ -189,6 +206,7 @@ def main() -> None:
                 dt=args.dt if args.dt is not None else 1.0,
                 output=args.output if args.output is not None else "output/measurement",
                 queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else RealtimeController.DEFAULT_QUEUE_MAXSIZE,
+                warmup=args.warmup if args.warmup is not None else 0.0,
             )
 
         # Parse device: try int, fall back to string
@@ -247,6 +265,8 @@ def main() -> None:
             config.output = args.output
         if args.dt is not None:
             config.dt = args.dt
+        if args.warmup is not None:
+            config.warmup = args.warmup
         if args.queue_maxsize is not None:
             config.queue_maxsize = args.queue_maxsize
     else:
@@ -260,6 +280,7 @@ def main() -> None:
             dt=args.dt if args.dt is not None else 1.0,
             output=args.output if args.output is not None else "output/measurement",
             queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else RealtimeController.DEFAULT_QUEUE_MAXSIZE,
+            warmup=args.warmup if args.warmup is not None else 0.0,
         )
 
     if not args.file and args.device is None and not args.generator:
@@ -272,14 +293,24 @@ def main() -> None:
             "--sensitivity-dbv DBV, or --sensitivity-mv MV"
         )
 
+    duration = None
+    if args.duration is not None:
+        from slm.app.cli import parse_duration
+        try:
+            duration = parse_duration(args.duration)
+        except ValueError as exc:
+            parser.error(str(exc))
+
     if args.file:
-        run_measurement(args.file, sens, config, print_to_console=True, realtime=args.realtime)
+        run_measurement(args.file, sens, config, print_to_console=True,
+                        realtime=args.realtime, duration=duration)
     elif args.generator:
         from slm.app.cli import run_noise_measurement
         run_noise_measurement(
             sens, config,
             samplerate=args.samplerate,
             print_to_console=True,
+            duration=duration,
         )
     else:
         from slm.app.cli import run_realtime_measurement
@@ -288,6 +319,7 @@ def main() -> None:
             device=args.device,
             samplerate=args.samplerate,
             print_to_console=True,
+            duration=duration,
         )
 
 

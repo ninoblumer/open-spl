@@ -33,6 +33,13 @@ class Meter(ProcessingElement, ABC):
     @abstractmethod
     def read(self) -> np.ndarray: ...
 
+    def reset(self) -> None:
+        """Clear accumulated state, leaving the parent chain's filter state intact.
+
+        Default is a no-op: rolling :class:`MovingMeter` outputs self-flush within
+        their window, so only the unbounded :class:`AccumulatingMeter` family needs
+        to override this (used after a warm-up period)."""
+
 
 # ---------------------------------------------------------------------------
 # AccumulatingMeter family — accumulate statistics over an unbounded window

@@ -126,6 +126,92 @@ class TestEngine:
         engine = Engine(ctrl, dt=1.0)
         engine.stop()  # should not raise
 
+    def _duration_engine(self):
+        """An engine on a free-running (non-realtime) noise source.
+
+        ``realtime=False`` lets the engine drive the pace, so a duration limit is
+        the only thing that stops this otherwise-infinite source.
+        """
+        from slm.io.noise_controller import NoiseController
+        from slm.engine import Engine
+        from slm.frequency_weighting import PluginZWeighting
+        ctrl = NoiseController(samplerate=SAMPLERATE, blocksize=BLOCKSIZE, realtime=False)
+        ctrl.set_sensitivity(1.0, unit="V")
+        engine = Engine(ctrl, dt=1.0)
+        engine.add_bus("Z", PluginZWeighting)
+        return engine, ctrl
+
+    def test_run_duration_stops_on_block_edge(self):
+        """A fixed duration stops the (otherwise infinite) noise source, rounding
+        the measured length up to the next whole block."""
+        engine, ctrl = self._duration_engine()
+        calls: list[tuple[float, float]] = []
+        engine.on_record = lambda ts, dt: calls.append((ts.total_seconds(), dt))
+
+        block_duration = BLOCKSIZE / SAMPLERATE
+        duration = 5.5 * block_duration   # not a whole number of blocks
+        with ctrl:
+            engine.run(duration=duration)
+
+        # One on_record per processed block (dt != 0); ceil(5.5) = 6 blocks.
+        block_calls = [ts for ts, dt in calls if dt != 0]
+        assert len(block_calls) == 6
+        last_start = block_calls[-1]
+        # The run covers at least `duration` ...
+        assert last_start + block_duration >= duration
+        # ... but stops on the first block edge that does, not later.
+        assert last_start < duration
+
+    def test_run_duration_exact_multiple(self):
+        """When duration is an exact multiple of the block duration, the run stops
+        at exactly that many blocks with no extra block."""
+        engine, ctrl = self._duration_engine()
+        n_blocks = 0
+
+        def _count(ts, dt):
+            nonlocal n_blocks
+            if dt != 0:
+                n_blocks += 1
+
+        engine.on_record = _count
+        block_duration = BLOCKSIZE / SAMPLERATE
+        with ctrl:
+            engine.run(duration=3 * block_duration)
+        assert n_blocks == 3
+
+    def test_warmup_skips_logging_and_rebases_time(self):
+        """Warm-up blocks are not logged, and measurement timestamps restart at 0."""
+        engine, ctrl = self._duration_engine()
+        calls: list[tuple[float, float]] = []
+        engine.on_record = lambda ts, dt: calls.append((ts.total_seconds(), dt))
+        bd = BLOCKSIZE / SAMPLERATE
+        with ctrl:
+            engine.run(duration=2 * bd, warmup=3 * bd)
+        block_calls = [ts for ts, dt in calls if dt != 0]
+        # Warm-up (3 blocks) logged nothing; only the 2 measurement blocks recorded.
+        assert len(block_calls) == 2
+        # First measurement timestamp rebased to 0 (warm-up time excluded).
+        assert block_calls[0] == pytest.approx(0.0, abs=1e-9)
+
+    def test_reset_meters_clears_accumulators(self):
+        """reset_meters zeroes accumulating meters (used after warm-up)."""
+        from slm.io.noise_controller import NoiseController
+        from slm.engine import Engine
+        from slm.assembly import parse_metric, build_chain
+        from slm.meter import LeqAccumulator
+        ctrl = NoiseController(samplerate=SAMPLERATE, blocksize=BLOCKSIZE, realtime=False)
+        ctrl.set_sensitivity(1.0, unit="V")
+        engine = Engine(ctrl, dt=1.0)
+        build_chain([parse_metric("LAeq")], engine)
+        with ctrl:
+            for _ in range(3):
+                engine._process_block()
+        accs = [m for bus in engine._busses.values() for p in bus.plugins
+                for m in getattr(p, "meters", {}).values() if isinstance(m, LeqAccumulator)]
+        assert accs and all(m._n_samples > 0 for m in accs)
+        engine.reset_meters()
+        assert all(m._n_samples == 0 for m in accs)
+
 
 # ---------------------------------------------------------------------------
 # PluginMeter.add_meter wrong parent

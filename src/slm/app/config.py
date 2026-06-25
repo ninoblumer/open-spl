@@ -15,6 +15,7 @@ class SLMConfig:
     metrics: list[str] = field(default_factory=list)
     dt: float = 1.0
     output: str = "output/measurement"
+    warmup: float = 0.0
     queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE
 
     # ------------------------------------------------------------------
@@ -35,7 +36,7 @@ class SLMConfig:
             raise ValueError(f"Unknown TOML sections: {unknown_sections}")
 
         meas = data.get("measurement", {})
-        unknown_meas = set(meas.keys()) - {"dt", "output", "queue_maxsize"}
+        unknown_meas = set(meas.keys()) - {"dt", "output", "warmup", "queue_maxsize"}
         if unknown_meas:
             raise ValueError(f"Unknown keys in [measurement]: {unknown_meas}")
 
@@ -58,10 +59,15 @@ class SLMConfig:
         if queue_maxsize < 1:
             raise ValueError(f"[measurement] queue_maxsize must be >= 1, got {queue_maxsize}")
 
+        warmup = float(meas.get("warmup", 0.0))
+        if warmup < 0:
+            raise ValueError(f"[measurement] warmup must be non-negative, got {warmup}")
+
         return cls(
             metrics=list(require),
             dt=dt,
             output=str(meas.get("output", "output/measurement")),
+            warmup=warmup,
             queue_maxsize=queue_maxsize,
         )
 
@@ -80,6 +86,7 @@ class SLMConfig:
             "[measurement]\n"
             f"dt            = {self.dt}\n"
             f'output        = "{self.output}"\n'
+            f"warmup        = {self.warmup}\n"
             f"queue_maxsize = {self.queue_maxsize}\n"
             "\n"
             "[metrics]\n"
@@ -93,7 +100,8 @@ class SLMConfig:
 
     @classmethod
     def from_args(cls, metrics: list[str], dt: float, output: str,
-                  queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE) -> "SLMConfig":
+                  queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE,
+                  warmup: float = 0.0) -> "SLMConfig":
         """Construct from parsed command-line arguments."""
         return cls(metrics=list(metrics), dt=dt, output=output,
-                   queue_maxsize=queue_maxsize)
+                   queue_maxsize=queue_maxsize, warmup=warmup)

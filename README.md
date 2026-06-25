@@ -34,6 +34,23 @@ Results are written to `output/measurement_report.csv` (broadband) and
 `output/measurement_rta_report.csv` (per-band). Use `--output` to change the path prefix and
 `--dt` to set the logging interval (default 1 s).
 
+Use `--duration` for a fixed-length measurement given as `hh:mm:ss`, `mm:ss`, or just `ss`
+(fields may be fractional); the run stops automatically on the next block edge. Without it,
+a file is read to its end and live sources (`--device`/`--generator`) run until `Ctrl+C`:
+
+```bash
+python -m slm --device 0 --sensitivity-mv 50 --measure LAeq --duration 00:05:00
+```
+
+Use `--warmup SECONDS` to settle the processing chain before measuring: the signal is
+processed but not logged, then the meters are reset so the accumulators ignore the start-up
+filter transient. Logged timestamps restart at 0 after warm-up, and `--duration` measures
+the post-warm-up length:
+
+```bash
+python -m slm --device 0 --sensitivity-mv 50 --measure LAeq --warmup 5 --duration 00:05:00
+```
+
 Add `--realtime` to pace the file playback at actual recording speed — useful when you want
 per-`dt` results to arrive at wall-clock intervals rather than all at once:
 
@@ -75,7 +92,36 @@ python -m slm -i --file recording.wav --fs-db 128.1 --config config.toml
 ```
 
 Key REPL commands: `file`, `device`, `sensitivity`, `calibrate`, `add`, `remove`, `dt`,
-`output`, `realtime`, `display`, `show`, `tree`, `save`, `load`, `start`.
+`output`, `name`, `warmup`, `realtime`, `display`, `show`, `tree`, `save`, `load`, `start`.
+
+`output DIR` sets the directory results are written to, and `name NAME` sets the
+measurement name (the output file stem); files are written to `DIR/NAME_report.csv`,
+`DIR/NAME_rta_report.csv`, etc.:
+
+```
+output results/2026     # set the output directory
+name street_noise_01    # set the measurement name
+                        # -> results/2026/street_noise_01_report.csv
+```
+
+`warmup SECONDS` runs a settling phase before measuring: the signal is processed but not
+logged, then the meters are reset so the accumulators (Leq, max/min) start from a settled
+filter state rather than from the initial transient. The logged timestamps restart at 0
+after warm-up, and a `start` duration measures the post-warm-up length.
+
+`start` takes an optional duration for a fixed-length measurement, given as `hh:mm:ss`,
+`mm:ss`, or just `ss` (fields may be fractional). With no argument it runs until the end
+of the file or `Ctrl+C`:
+
+```
+start            # run until end of file / Ctrl+C
+start 30         # run for 30 seconds
+start 1:30       # run for 1 minute 30 seconds
+start 01:00:00   # run for 1 hour
+```
+
+The run stops on a block edge, so the measured length is rounded up to the next whole
+block (`blocksize/fs`).
 
 ### Real-time input (requires sounddevice)
 
@@ -336,6 +382,7 @@ A TOML file lets you pin every measurement option so runs are reproducible.
 [measurement]
 dt     = 1.0                      # logging interval in seconds (default: 1.0)
 output = "output/my_measurement"  # path prefix for output CSV files (default: output/measurement)
+warmup = 0.0                      # settle time in seconds before measuring (default: 0.0)
 
 [metrics]
 require = [
@@ -362,7 +409,15 @@ python -m slm --file recording.wav --config config.toml --fs-db 128.1
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `dt` | float | `1.0` | Logging interval in seconds. Each metric is sampled once per `dt` seconds and written as one row in the output CSV. |
-| `output` | string | `"output/measurement"` | Output path prefix. Broadband results go to `{output}_report.csv`; per-band RTA results go to `{output}_rta_report.csv`. |
+| `output` | string | `"output/measurement"` | Output path prefix. Broadband results go to `{output}_report.csv`; per-band RTA results go to `{output}_rta_report.csv`. In the REPL the directory and name halves are set separately with `output` and `name`. |
+| `warmup` | float | `0.0` | Settle time in seconds before measuring. The signal is processed but not logged during warm-up, then the meters are reset so the accumulators ignore the start-up filter transient. Logged timestamps restart at 0 afterwards. |
+
+> **Note on `dt` resolution.** Log rows are written on block edges, so the logging
+> cadence is quantized to the block duration (`blocksize/fs`). A `dt` that is an exact
+> integer multiple of the block duration logs at the requested interval; otherwise each
+> interval is rounded up to the next block edge and the effective `dt` drifts slightly
+> above the configured value. (The moving-window length of `_dt` metrics is sample-exact
+> regardless; only the instant at which it is sampled and logged is block-snapped.)
 
 **`[metrics]` keys**
 

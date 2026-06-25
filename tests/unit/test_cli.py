@@ -16,6 +16,7 @@ from slm.app.cli import (
     sensitivity_from_fs_db,
     sensitivity_from_mv,
     sensitivity_from_dbv,
+    parse_duration,
     _fmt_sensitivity,
     run_measurement,
     SLMShell,
@@ -83,6 +84,23 @@ class TestSLMConfigToml:
         with pytest.raises(ValueError, match="dt must be positive"):
             SLMConfig.from_toml(toml_path)
 
+    def test_warmup_round_trip(self, tmp_path):
+        config = SLMConfig(metrics=["LAeq"], warmup=2.5)
+        toml_path = tmp_path / "config.toml"
+        config.to_toml(toml_path)
+        assert SLMConfig.from_toml(toml_path).warmup == pytest.approx(2.5)
+
+    def test_warmup_defaults_to_zero(self, tmp_path):
+        toml_path = tmp_path / "minimal.toml"
+        toml_path.write_text("[measurement]\n", encoding="utf-8")
+        assert SLMConfig.from_toml(toml_path).warmup == pytest.approx(0.0)
+
+    def test_negative_warmup_raises(self, tmp_path):
+        toml_path = tmp_path / "bad.toml"
+        toml_path.write_text('[measurement]\nwarmup = -1.0\n', encoding="utf-8")
+        with pytest.raises(ValueError, match="warmup must be non-negative"):
+            SLMConfig.from_toml(toml_path)
+
     def test_file_created(self, tmp_path):
         config = SLMConfig(metrics=["LAeq"], dt=1.0, output="out")
         toml_path = tmp_path / "sub" / "config.toml"
@@ -118,6 +136,49 @@ class TestSensitivityHelpers:
         assert sensitivity_from_dbv(0.0) == pytest.approx(1.0, rel=1e-10)
         assert sensitivity_from_dbv(-20.0) == pytest.approx(0.1, rel=1e-8)
         assert sensitivity_from_dbv(20.0) == pytest.approx(10.0, rel=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# parse_duration
+# ---------------------------------------------------------------------------
+
+class TestParseDuration:
+
+    def test_seconds_only(self):
+        assert parse_duration("30") == pytest.approx(30.0)
+
+    def test_mm_ss(self):
+        assert parse_duration("1:30") == pytest.approx(90.0)
+
+    def test_hh_mm_ss(self):
+        assert parse_duration("01:02:03") == pytest.approx(3723.0)
+
+    def test_fractional_fields(self):
+        assert parse_duration("1.5") == pytest.approx(1.5)
+        assert parse_duration("0:0.5") == pytest.approx(0.5)
+
+    def test_surrounding_whitespace(self):
+        assert parse_duration("  90 ") == pytest.approx(90.0)
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("")
+
+    def test_too_many_fields_raises(self):
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("1:2:3:4")
+
+    def test_non_numeric_raises(self):
+        with pytest.raises(ValueError):
+            parse_duration("ab")
+
+    def test_negative_field_raises(self):
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("-5")
+
+    def test_zero_total_raises(self):
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_duration("0")
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +232,45 @@ class TestCLIArgParsing:
         args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
         # --dt default is None; main() applies the 1.0 fallback when building SLMConfig
         assert args.dt is None
+
+    def test_duration_default_is_none(self):
+        from slm.app.__main__ import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
+        assert args.duration is None
+
+    def test_duration_flag_parses_as_string(self):
+        from slm.app.__main__ import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["--file", "f.wav", "--measure", "LAeq", "--duration", "1:30"]
+        )
+        # Stored raw; parse_duration is applied in main()
+        assert args.duration == "1:30"
+
+    def test_warmup_default_is_none(self):
+        from slm.app.__main__ import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
+        assert args.warmup is None
+
+    def test_warmup_flag_parses(self):
+        from slm.app.__main__ import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["--file", "f.wav", "--measure", "LAeq", "--warmup", "2.5"]
+        )
+        assert args.warmup == pytest.approx(2.5)
+
+    def test_negative_warmup_rejected(self):
+        from slm.app.__main__ import _build_parser, main
+        import sys
+        parser = _build_parser()
+        # Parsing succeeds; main() rejects via parser.error -> SystemExit
+        argv = ["slm", "--generator", "--measure", "LAeq", "--sensitivity-mv", "50",
+                "--warmup", "-1"]
+        with patch.object(sys, "argv", argv), pytest.raises(SystemExit):
+            main()
 
     def test_output_default(self):
         from slm.app.__main__ import _build_parser
@@ -644,6 +744,91 @@ class TestSLMShellStartErrors:
         assert "metric" in out.lower()
 
 
+class TestSLMShellOutputName:
+    """`output` sets the directory; `name` sets the file stem; each keeps the other."""
+
+    def test_output_sets_directory_keeps_name(self):
+        shell = SLMShell()   # default output "output/measurement"
+        shell.do_output("results/2026")
+        assert shell._config.output == str(Path("results/2026") / "measurement")
+
+    def test_name_sets_stem_keeps_directory(self):
+        shell = SLMShell()
+        shell.do_name("street_01")
+        assert shell._config.output == str(Path("output") / "street_01")
+
+    def test_output_then_name_compose(self):
+        shell = SLMShell()
+        shell.do_output("results/2026")
+        shell.do_name("street_01")
+        assert shell._config.output == str(Path("results/2026") / "street_01")
+
+    def test_output_no_arg_shows_current_dir(self, capsys):
+        shell = SLMShell()
+        shell.do_output("")
+        assert "Output dir" in capsys.readouterr().out
+
+    def test_name_no_arg_shows_current_name(self, capsys):
+        shell = SLMShell()
+        shell.do_name("")
+        out = capsys.readouterr().out
+        assert "Measurement" in out and "measurement" in out
+
+
+class TestSLMShellWarmup:
+
+    def test_warmup_sets_value(self, capsys):
+        shell = SLMShell()
+        shell.do_warmup("2.5")
+        assert shell._config.warmup == pytest.approx(2.5)
+
+    def test_warmup_no_arg_shows_current(self, capsys):
+        shell = SLMShell()
+        shell.do_warmup("")
+        assert "Warm-up" in capsys.readouterr().out
+
+    def test_warmup_negative_rejected(self, capsys):
+        shell = SLMShell()
+        shell.do_warmup("-1")
+        assert "Invalid" in capsys.readouterr().out
+        assert shell._config.warmup == pytest.approx(0.0)   # unchanged
+
+    def test_warmup_text_rejected(self, capsys):
+        shell = SLMShell()
+        shell.do_warmup("soon")
+        assert "Invalid" in capsys.readouterr().out
+
+
+class TestSLMShellStartDuration:
+    """do_start forwards a parsed duration to the runner; bad input is rejected."""
+
+    def _ready_shell(self):
+        shell = SLMShell()
+        shell._generator_mode = True
+        shell._sensitivity_v = 0.05
+        shell._config.metrics = ["LAeq"]
+        return shell
+
+    def test_no_arg_passes_none(self):
+        shell = self._ready_shell()
+        with patch("slm.app.cli.run_noise_measurement") as m:
+            shell.do_start("")
+        assert m.call_args.kwargs["duration"] is None
+
+    def test_duration_parsed_and_forwarded(self):
+        shell = self._ready_shell()
+        with patch("slm.app.cli.run_noise_measurement") as m:
+            shell.do_start("1:30")
+        assert m.call_args.kwargs["duration"] == pytest.approx(90.0)
+
+    def test_invalid_duration_does_not_run(self, capsys):
+        shell = self._ready_shell()
+        with patch("slm.app.cli.run_noise_measurement") as m:
+            shell.do_start("nonsense")
+        m.assert_not_called()
+        assert "Invalid duration" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------
 # run_noise_measurement — invalid sensitivity
 # ---------------------------------------------------------------------------
@@ -672,7 +857,7 @@ class TestRunNoiseMeasurement:
         config = SLMConfig(metrics=["LAeq"], dt=1.0,
                            output=str(tmp_path / "result"))
 
-        def _short_run(self):
+        def _short_run(self, duration=None, warmup=0.0):
             for _ in range(10):
                 self._process_block()
             if self._last_timestamp is not None:
