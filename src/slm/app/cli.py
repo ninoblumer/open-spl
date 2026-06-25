@@ -304,6 +304,14 @@ class SLMShell(cmd.Cmd):
         self._device: int | str | None = None
         self._generator_mode: bool = False
 
+    def emptyline(self) -> bool:
+        """Do nothing on an empty line.
+
+        The :class:`cmd.Cmd` default repeats the last command; instead we
+        just print a fresh prompt.
+        """
+        return False
+
     # ------------------------------------------------------------------
     # Metric management
     # ------------------------------------------------------------------
