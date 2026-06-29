@@ -9,3 +9,4 @@ build/
 .coverage
 todo.md
 thesis_figures/**
+data/**/comparison_summary.csv
