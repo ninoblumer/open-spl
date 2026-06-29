@@ -74,9 +74,9 @@ DATA_DIR = Path("data/slm-test-02")
 WEIGHTINGS = (("A", PluginAWeighting), ("C", PluginCWeighting), ("Z", PluginZWeighting))
 
 # Tolerances (dB). Errors are always printed; these only colour the PASS/FAIL flag.
-TOL_EQ = 0.3        # Leq / SEL
-TOL_MAXMIN = 0.5    # time-weighted max / min (transient-sensitive on impulsive scenes)
-TOL_PEAK = 1.0      # instantaneous peak (single-sample, most sensitive to alignment)
+TOL_EQ = 0.1        # Leq / SEL
+TOL_MAXMIN = 0.1    # time-weighted max / min
+TOL_PEAK = 0.1      # instantaneous peak
 TOL_RTA = 0.5       # per 1/3-oct band
 
 _TW_CLS = {
