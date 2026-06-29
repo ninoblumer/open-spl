@@ -6,8 +6,12 @@ signal. For a step from steady-state A² down to 0, the output must decay as:
     y(t) = A² * exp(-t / tau)
 i.e. after exactly tau seconds the output is e^{-1} ≈ 36.8 % of the peak.
 
-The Impulse weighting uses separate rise (35 ms) and fall (1500 ms) time constants
-and is implemented in the numba function `asymmetric_time_weighting`.
+The Impulse weighting is a two-stage detector (symmetric 35 ms detector + peak
+hold decaying at 1500 ms), implemented in the numba function
+`_asymmetric_time_weighting`.  Driven by a DC step the two stages collapse to a
+single exponential, so the 35 ms rise and 1500 ms fall constants are still
+verifiable in isolation here; the steady-state (no-bias) behaviour is covered in
+test_impulse_time_weighting.py.
 """
 import numpy as np
 import pytest
@@ -66,42 +70,53 @@ def _sym_decay_ratio(tau: float) -> float:
 
 def _asym_rise_ratio(tau_rise: float, tau_fall: float) -> float:
     """
-    Drive the asymmetric filter from 0 with x=1 for exactly tau_rise seconds.
+    Drive the impulse filter from 0 with a DC input for exactly tau_rise seconds.
     Returns y(tau_rise) / y_ss.  Expected: (1 - e^{-1}) ≈ 0.6321.
+
+    With a DC (monotonically rising) input the detector stays above the hold every
+    sample, so the hold tracks the detector exactly and the output is the pure
+    35 ms exponential rise.
     """
-    alpha_rise = 1.0 - np.exp(-1.0 / (tau_rise * FS))
-    alpha_fall = 1.0 - np.exp(-1.0 / (tau_fall * FS))
+    alpha_detector = 1.0 - np.exp(-1.0 / (tau_rise * FS))
+    alpha_decay = 1.0 - np.exp(-1.0 / (tau_fall * FS))
     # Approximate steady-state with a long rise (10×tau_rise)
     n_long = int(10 * tau_rise * FS)
-    zi = np.zeros(1)
+    zi_detector, zi_hold = np.zeros(1), np.zeros(1)
     out = np.empty((1, n_long))
-    _asymmetric_time_weighting(np.ones((1, n_long)), zi, alpha_rise, alpha_fall, out)
+    _asymmetric_time_weighting(np.ones((1, n_long)), zi_detector, zi_hold,
+                               alpha_detector, alpha_decay, out)
     y_ss = float(out[0, -1])
     # Measure rise from 0 for exactly tau_rise
     n = int(tau_rise * FS)
-    zi = np.zeros(1)
+    zi_detector, zi_hold = np.zeros(1), np.zeros(1)
     out = np.empty((1, n))
-    _asymmetric_time_weighting(np.ones((1, n)), zi, alpha_rise, alpha_fall, out)
+    _asymmetric_time_weighting(np.ones((1, n)), zi_detector, zi_hold,
+                               alpha_detector, alpha_decay, out)
     return float(out[0, -1]) / y_ss
 
 
 def _asym_fall_ratio(tau_rise: float, tau_fall: float) -> float:
     """
-    Drive the asymmetric filter toward steady state, record y₀ (last sample of
-    rise), then feed x=0 for exactly tau_fall seconds and record y₁.
+    Drive the impulse filter toward steady state with a DC input, record y₀ (last
+    sample of rise), then feed x=0 for exactly tau_fall seconds and record y₁.
     Returns y₁ / y₀.  Expected: e^{-1} ≈ 0.3679.
+
+    Once the input drops to 0 the detector falls below the hold immediately, so
+    the hold decays purely at the 1500 ms time constant.
     """
-    alpha_rise = 1.0 - np.exp(-1.0 / (tau_rise * FS))
-    alpha_fall = 1.0 - np.exp(-1.0 / (tau_fall * FS))
+    alpha_detector = 1.0 - np.exp(-1.0 / (tau_rise * FS))
+    alpha_decay = 1.0 - np.exp(-1.0 / (tau_fall * FS))
     n_rise = int(5 * tau_rise * FS)
-    zi = np.zeros(1)
+    zi_detector, zi_hold = np.zeros(1), np.zeros(1)
     out = np.empty((1, n_rise))
-    _asymmetric_time_weighting(np.ones((1, n_rise)), zi, alpha_rise, alpha_fall, out)
+    _asymmetric_time_weighting(np.ones((1, n_rise)), zi_detector, zi_hold,
+                               alpha_detector, alpha_decay, out)
     y0 = float(out[0, -1])
-    # zi is now the final rise state; continue from there into the fall phase
+    # zi_detector/zi_hold now hold the final rise state; continue into the fall.
     n_fall = int(tau_fall * FS)
     out = np.empty((1, n_fall))
-    _asymmetric_time_weighting(np.zeros((1, n_fall)), zi, alpha_rise, alpha_fall, out)
+    _asymmetric_time_weighting(np.zeros((1, n_fall)), zi_detector, zi_hold,
+                               alpha_detector, alpha_decay, out)
     return float(out[0, -1]) / y0
 
 

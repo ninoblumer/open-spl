@@ -2,14 +2,17 @@
 
 IEC 61672-1:2013 §5.8 covers only F and S time weightings — Impulse was
 deliberately excluded from the 2013 revision.  PluginImpulseTimeWeighting
-implements the legacy IEC 60651/IEC 60804 I-weighting:
-    τ_rise = 35 ms   (attack)
-    τ_fall = 1500 ms (decay)
+implements the legacy IEC 60651/IEC 60804 I-weighting as a two-stage detector:
+    stage 1: symmetric exponential detector, τ = 35 ms   (attack)
+    stage 2: peak hold decaying at            τ = 1500 ms (decay, ~2.9 dB/s)
 
 These tests verify that the implemented time constants are correct:
   1. Fall rate: decay after signal cutoff ≈ 10/(τ_fall·ln 10) ≈ 2.90 dB/s
   2. Rise time constant: output reaches 63 % of steady state within τ_rise
   3. Asymmetry: rise is faster than fall (τ_rise << τ_fall)
+  4. No rectification bias: on a steady fluctuating signal the Impulse level
+     converges to the mean-square (Leq) level — the property a single asymmetric
+     one-pole on x² violates (it reads a tone ~+3 dB and noise ~+6 dB high).
 
 Tolerance: ±15 % on each time constant (in the absence of a normative limit,
 this matches the IEC 61260-1 Annex B guidance of 10 % for filter decay time
@@ -151,6 +154,59 @@ class TestImpulseRiseTimeConstant:
             f"(τ_rise = {self.TAU_RISE * 1000:.0f} ms, "
             f"tolerance ±{self.TOLERANCE * 100:.0f} %: "
             f"[{lo * 1000:.1f}, {hi * 1000:.1f}] ms)"
+        )
+
+
+class TestImpulseNoRectificationBias:
+    """On a steady fluctuating input the Impulse level must converge to the
+    mean-square (Leq) level — the two-stage detector has no rectification bias.
+
+    Regression guard for the single-pole topology bug: a fast-attack/slow-release
+    one-pole on x² parks near the *peaks* of x², reading a steady tone ~+3 dB and
+    noise ~+6 dB high.  This test fails for that topology and passes for the
+    correct symmetric-detector + peak-hold cascade.  (Validated end-to-end against
+    an NTi XL2: it brought LAImax on slm-test-02 SLM_001 from +4.4 dB to +0.01 dB.)
+    """
+
+    @staticmethod
+    def _steady_state_db(signal: np.ndarray) -> tuple[float, float]:
+        """Return (impulse steady-state level, Leq) in dB for *signal*.
+
+        Steady state = the mean of the Impulse output over the final second,
+        after the slow 1500 ms hold has settled.
+        """
+        plugin = PluginImpulseTimeWeighting(input=_mock_bus())
+        out = []
+        for start in range(0, len(signal) - BLOCKSIZE, BLOCKSIZE):
+            plugin.process(signal[start:start + BLOCKSIZE][np.newaxis, :])
+            out.append(plugin.output[0, :].copy())
+        y = np.concatenate(out)
+        impulse_db = 10.0 * np.log10(y[-SAMPLERATE:].mean())
+        leq_db = 10.0 * np.log10(np.mean(signal ** 2))
+        return impulse_db, leq_db
+
+    def test_tone_has_no_bias(self):
+        """A steady 1 kHz tone: Impulse steady state must equal Leq within 0.1 dB."""
+        t = np.arange(int(8.0 * SAMPLERATE)) / SAMPLERATE
+        signal = 0.5 * np.sin(2.0 * np.pi * 1000.0 * t)
+        impulse_db, leq_db = self._steady_state_db(signal)
+        assert abs(impulse_db - leq_db) <= 0.1, (
+            f"tone Impulse bias = {impulse_db - leq_db:+.2f} dB "
+            f"(single-pole topology gives ~+3 dB)"
+        )
+
+    def test_noise_has_no_bias(self):
+        """Steady white noise: Impulse steady state must be near Leq (≤ 0.5 dB).
+
+        The hold catches short-term peaks so a tiny positive bias remains, but it
+        is far below the ~+6 dB of the single-pole topology.
+        """
+        rng = np.random.default_rng(0)
+        signal = rng.standard_normal(int(8.0 * SAMPLERATE))
+        impulse_db, leq_db = self._steady_state_db(signal)
+        assert abs(impulse_db - leq_db) <= 0.5, (
+            f"noise Impulse bias = {impulse_db - leq_db:+.2f} dB "
+            f"(single-pole topology gives ~+6 dB)"
         )
 
 

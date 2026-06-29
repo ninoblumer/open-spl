@@ -56,12 +56,19 @@ class PluginAsymmetricTimeWeighting(PluginTimeWeighting):
         self._compute_filter()
 
     def _compute_filter(self):
-        self._alpha_rise = 1 - np.exp(-1 / (self.samplerate * self.tau[0]))
-        self._alpha_fall = 1 - np.exp(-1 / (self.samplerate * self.tau[1]))
-        self._zi = np.zeros(self.width)
+        # Two cascaded stages (see :func:`_asymmetric_time_weighting`):
+        #   stage 1 — symmetric exponential detector,  tau[0] = 35 ms
+        #   stage 2 — peak hold decaying with           tau[1] = 1500 ms
+        self._alpha_detector = 1 - np.exp(-1 / (self.samplerate * self.tau[0]))
+        self._alpha_decay = 1 - np.exp(-1 / (self.samplerate * self.tau[1]))
+        self._zi_detector = np.zeros(self.width)
+        self._zi_hold = np.zeros(self.width)
 
     def func(self, block: np.ndarray):
-        _asymmetric_time_weighting(block, self._zi, self._alpha_rise, self._alpha_fall, self.output)
+        _asymmetric_time_weighting(
+            block, self._zi_detector, self._zi_hold,
+            self._alpha_detector, self._alpha_decay, self.output,
+        )
 
 
 class PluginFastTimeWeighting(PluginSymmetricTimeWeighting):
@@ -130,24 +137,40 @@ def _symmetric_time_weighting(x, zi, alpha, out):
 #  It is verified functionally against the IEC 61672-1 Impulse time-weighting tests
 #  (tests/unit/test_impulse_time_weighting.py).
 @jit(nopython=True, cache=True)  # pragma: no cover
-def _asymmetric_time_weighting(x, zi, alpha_rise, alpha_fall, out):
-    """Process one block with IEC 61672-1 Impulse time weighting.
+def _asymmetric_time_weighting(x, zi_detector, zi_hold, alpha_detector, alpha_decay, out):
+    """Process one block with the IEC 60651/60804 Impulse time weighting.
+
+    Two cascaded stages:
+      1. a *symmetric* exponential detector (tau = 35 ms) on the squared signal,
+         which yields the unbiased short-term mean square, then
+      2. a peak hold that snaps up to the detector's value and otherwise decays
+         exponentially (tau = 1500 ms, ~2.9 dB/s).
+
+    A single asymmetric one-pole on x² (fast attack, slow release) is NOT
+    equivalent: it parks near the *peaks* of x², biasing fluctuating signals
+    several dB high (~+3 dB on a tone, ~+6 dB on noise).  The symmetric detector
+    removes that rectification bias; the hold then captures genuine impulses.
 
     Parameters
     ----------
-    x          : 2-D array (channels, samples) — raw (unsquared) pressure
-    zi         : 1-D float64 array (channels,) — IIR state per channel
-    alpha_rise : float — rise coefficient  (= 1 - exp(-1 / (tau_rise * fs)))
-    alpha_fall : float — fall coefficient  (= 1 - exp(-1 / (tau_fall * fs)))
-    out        : 2-D float64 array (channels, samples) — written in-place
+    x              : 2-D array (channels, samples) — raw (unsquared) pressure
+    zi_detector    : 1-D float64 array (channels,) — stage-1 detector state per channel
+    zi_hold        : 1-D float64 array (channels,) — stage-2 hold state per channel
+    alpha_detector : float — detector coefficient (= 1 - exp(-1 / (tau_detector * fs)))
+    alpha_decay    : float — hold-decay coefficient (= 1 - exp(-1 / (tau_decay * fs)))
+    out            : 2-D float64 array (channels, samples) — written in-place
     """
     n_ch, n_samp = x.shape
     for ch in range(n_ch):
-        state = zi[ch]
+        detector = zi_detector[ch]
+        hold = zi_hold[ch]
         for n in range(n_samp):
             xn = x[ch, n]
-            x2 = xn * xn
-            a = alpha_rise if x2 > state else alpha_fall
-            state = (1.0 - a) * state + a * x2
-            out[ch, n] = state
-        zi[ch] = state
+            detector = (1.0 - alpha_detector) * detector + alpha_detector * (xn * xn)
+            if detector > hold:
+                hold = detector                       # instantaneous attack to the peak
+            else:
+                hold = (1.0 - alpha_decay) * hold      # slow exponential release
+            out[ch, n] = hold
+        zi_detector[ch] = detector
+        zi_hold[ch] = hold
