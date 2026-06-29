@@ -78,7 +78,10 @@ class LeqAccumulator(AccumulatingMeter):
         self._n_samples += block.shape[-1]
 
     def read(self) -> np.ndarray:
-        return self._sum_sq / max(1, self._n_samples)
+        # No data yet → 0/0 = NaN (don't report until at least one sample),
+        # matching the NaN-until-full behaviour of the MovingMeter family.
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return self._sum_sq / self._n_samples
 
     def reset(self):
         self._sum_sq[:] = 0.0
@@ -95,15 +98,22 @@ class MaxAccumulator(AccumulatingMeter):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._acc = np.full((self.width,), -np.inf)
+        self._n_samples = 0
 
     def process(self, block: np.ndarray):
         self._acc = np.maximum(self._acc, np.max(block, axis=-1))
+        self._n_samples += block.shape[-1]
 
     def read(self) -> np.ndarray:
+        # The reduction identity must stay -inf (NaN would be sticky through
+        # np.maximum); gate on the sample count to report NaN until data arrives.
+        if self._n_samples == 0:
+            return np.full((self.width,), np.nan)
         return self._acc
 
     def reset(self):
         self._acc[:] = -np.inf
+        self._n_samples = 0
 
 
 class MinAccumulator(AccumulatingMeter):
@@ -116,15 +126,22 @@ class MinAccumulator(AccumulatingMeter):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._acc = np.full((self.width,), np.inf)
+        self._n_samples = 0
 
     def process(self, block: np.ndarray):
         self._acc = np.minimum(self._acc, np.min(block, axis=-1))
+        self._n_samples += block.shape[-1]
 
     def read(self) -> np.ndarray:
+        # The reduction identity must stay +inf (NaN would be sticky through
+        # np.minimum); gate on the sample count to report NaN until data arrives.
+        if self._n_samples == 0:
+            return np.full((self.width,), np.nan)
         return self._acc
 
     def reset(self):
         self._acc[:] = np.inf
+        self._n_samples = 0
 
 
 class LastAccumulatingMeter(AccumulatingMeter):
@@ -137,7 +154,7 @@ class LastAccumulatingMeter(AccumulatingMeter):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._last = np.zeros((self.width,))
+        self._last = np.full((self.width,), np.nan)   # NaN until the first block
 
     def process(self, block: np.ndarray):
         self._last = block[:, -1]
@@ -146,7 +163,7 @@ class LastAccumulatingMeter(AccumulatingMeter):
         return self._last
 
     def reset(self):
-        self._last[:] = 0.0
+        self._last[:] = np.nan
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +185,14 @@ class MovingMeter(Meter, ABC):
     Subclasses pick the reduction by setting ``_ufunc`` to a binary numpy ufunc
     (``np.add`` for Leq/LE, ``np.maximum`` / ``np.minimum`` for max/min); both
     the per-block push and the window combine use it.
+
+    The FIFOs are NaN-initialised so an as-yet-unfilled window reads NaN rather
+    than ramping up from zero: ``read()`` only returns a value once a full
+    ``n``-sample window of real data has been pushed.  This relies on NaN being
+    *absorbing* for ``_ufunc`` — ``np.add``/``np.maximum``/``np.minimum`` all
+    propagate NaN.  Do NOT swap ``_ufunc`` for a NaN-ignoring variant
+    (``np.fmax``/``np.fmin``/``np.nansum``): that would silently resurrect the
+    ramp-up.  ``tests/unit/test_meter.py::TestNanWarmup`` guards this.
     """
 
     t: float = property(lambda self: self._t)
@@ -181,8 +206,8 @@ class MovingMeter(Meter, ABC):
         self._n = round(self._t * self.samplerate)         # window length, samples
         self.n_blocks = ceil(self._n / self.blocksize)
         self._o = (-self._n) % self.blocksize              # tail start offset within a block
-        self._fifo_full = FIFO((self.width, self.n_blocks))   # whole-block aggregate
-        self._fifo_part = FIFO((self.width, self.n_blocks))   # tail (block[:, o:]) aggregate
+        self._fifo_full = FIFO((self.width, self.n_blocks), fill=np.nan)   # whole-block aggregate
+        self._fifo_part = FIFO((self.width, self.n_blocks), fill=np.nan)   # tail (block[:, o:]) aggregate
 
     def process(self, block: np.ndarray):
         self._fifo_full.push(self._ufunc.reduce(block, axis=-1))
@@ -263,6 +288,8 @@ class LEAccumulator(LeqAccumulator):
 
     def read(self) -> np.ndarray:
         # sum_sq / samplerate = E (Pa²·s); read_db divides by p₀² → LE.
+        if self._n_samples == 0:                       # NaN until data, like LeqAccumulator
+            return np.full((self.width,), np.nan)
         return self._sum_sq / self.samplerate
 
 

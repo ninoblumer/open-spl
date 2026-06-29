@@ -63,10 +63,10 @@ class TestLeqAccumulator:
         m.process(block)
         np.testing.assert_allclose(m.read(), [1.0, 2.0])
 
-    def test_read_before_process_returns_zero(self):
+    def test_read_before_process_returns_nan(self):
         p = _parent()
         m = LeqAccumulator(name="leq", parent=p)
-        np.testing.assert_array_equal(m.read(), [0.0])
+        assert np.isnan(m.read()).all()
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,9 @@ class TestMaxAccumulator:
         m = MaxAccumulator(name="max", parent=p)
         m.process(np.ones((1, 4)) * 5.0)
         m.reset()
-        assert m.read()[0] == -np.inf
+        # No data after reset → NaN; internal reduction identity is back to -inf.
+        assert np.isnan(m.read()[0])
+        assert m._acc[0] == -np.inf
 
     def test_accumulates_after_reset(self):
         p = _parent()
@@ -126,7 +128,9 @@ class TestMinAccumulator:
         m = MinAccumulator(name="min", parent=p)
         m.process(np.ones((1, 4)) * 2.0)
         m.reset()
-        assert m.read()[0] == np.inf
+        # No data after reset → NaN; internal reduction identity is back to +inf.
+        assert np.isnan(m.read()[0])
+        assert m._acc[0] == np.inf
 
 
 # ---------------------------------------------------------------------------
@@ -218,12 +222,13 @@ class TestMovingMeterExactness:
 
     @staticmethod
     def _window(signal: np.ndarray, n: int, endpos: int) -> np.ndarray:
-        """The exact last-``n`` samples ending at ``endpos`` (front zero-padded
-        before the start of the stream, mirroring the zero-initialised FIFO)."""
+        """The exact last-``n`` samples ending at ``endpos`` (front NaN-padded
+        before the start of the stream, mirroring the NaN-initialised FIFO so an
+        unfilled window reduces to NaN instead of ramping up)."""
         start = endpos - n
         if start >= 0:
             return signal[start:endpos]
-        return np.concatenate([np.zeros(-start), signal[:endpos]])
+        return np.concatenate([np.full(-start, np.nan), signal[:endpos]])
 
     def _check(self, meter_cls, reduce_ref, blocksize, *, width=1):
         rng = np.random.default_rng(42)
@@ -268,6 +273,76 @@ class TestMovingMeterExactness:
 
 
 # ---------------------------------------------------------------------------
+# NaN warm-up — meters report NaN until they hold real data, never ramp from 0
+# ---------------------------------------------------------------------------
+
+class TestNanWarmup:
+    """A moving meter must read NaN until its window is fully populated, and an
+    accumulator until it has seen at least one sample.
+
+    The moving-meter half is also the regression guard requested for the
+    reduction ufuncs: it passes only because ``np.add``/``np.maximum``/
+    ``np.minimum`` *propagate* NaN.  Swapping ``_ufunc`` for a NaN-ignoring
+    variant (``np.fmax``/``np.fmin``/``np.nansum``) would let the partially
+    filled window read a real number during warm-up and fail these tests.
+    """
+
+    # --- moving meters: NaN until the window fills, real value once full ---
+
+    @pytest.mark.parametrize("cls,value,expected", [
+        (LeqMovingMeter, 2.0, 2.0),
+        (MaxMovingMeter, 3.0, 3.0),
+        (MinMovingMeter, 0.5, 0.5),
+    ])
+    def test_moving_nan_until_window_full(self, cls, value, expected):
+        p = _moving_parent(blocksize=4800)            # t=1.0s → n_blocks=10
+        m = cls(name="m", parent=p, t=1.0)
+        assert m.n_blocks == 10
+        for _ in range(9):                            # one block short of full
+            m.process(np.full((1, 4800), value))
+            assert np.isnan(m.read()).all()           # would be `value` under fmax/fmin/nansum
+        m.process(np.full((1, 4800), value))          # 10th block completes the window
+        np.testing.assert_allclose(m.read(), [expected])
+
+    def test_ufuncs_are_nan_propagating(self):
+        """Direct tripwire: the NaN-until-full contract above depends on these
+        exact ufuncs.  ``np.fmax``/``np.fmin``/``np.nansum`` would break it."""
+        assert LeqMovingMeter._ufunc is np.add
+        assert MaxMovingMeter._ufunc is np.maximum
+        assert MinMovingMeter._ufunc is np.minimum
+
+    # --- accumulators: NaN until the first sample ---
+
+    @pytest.mark.parametrize("cls", [
+        LeqAccumulator, MaxAccumulator, MinAccumulator, LastAccumulatingMeter,
+    ])
+    def test_accumulator_nan_before_data(self, cls):
+        p = _parent()
+        m = cls(name="m", parent=p)
+        assert np.isnan(m.read()).all()
+        m.process(np.array([[1.0, 2.0, 3.0, 4.0]]))
+        assert not np.isnan(m.read()).any()
+
+    def test_le_accumulator_nan_before_data(self):
+        from slm.meter import LEAccumulator
+        p = _parent()
+        m = LEAccumulator(name="le", parent=p)
+        assert np.isnan(m.read()).all()
+        m.process(np.array([[1.0, 2.0, 3.0, 4.0]]))
+        assert not np.isnan(m.read()).any()
+
+    def test_le_moving_nan_until_window_full(self):
+        from slm.meter import LEMovingMeter
+        p = _moving_parent(blocksize=4800)
+        m = LEMovingMeter(name="le", parent=p, t=1.0)
+        for _ in range(9):
+            m.process(np.ones((1, 4800)))
+            assert np.isnan(m.read()).all()
+        m.process(np.ones((1, 4800)))
+        assert not np.isnan(m.read()).any()
+
+
+# ---------------------------------------------------------------------------
 # to_str coverage
 # ---------------------------------------------------------------------------
 
@@ -298,7 +373,7 @@ class TestLastAccumulatingMeterReset:
         m = LastAccumulatingMeter(name="last", parent=p)
         m.process(np.array([[1.0, 2.0, 3.0, 4.0]]))
         m.reset()
-        np.testing.assert_array_equal(m._last, [0.0])
+        assert np.isnan(m._last).all()
 
 
 # ---------------------------------------------------------------------------

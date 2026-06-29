@@ -4,12 +4,13 @@ import numpy as np
 class FIFO:
     size = property(lambda self: self.buffer.shape[1])
 
-    def __init__(self, shape):
-        self.buffer = np.zeros(shape)
+    def __init__(self, shape, fill=0.0):
+        self._fill = fill
+        self.buffer = np.full(shape, fill)
         self.index = 0
 
     def reset(self):
-        self.buffer.fill(0)
+        self.buffer.fill(self._fill)
         self.index = 0
 
     def push(self, value):

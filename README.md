@@ -174,6 +174,11 @@ L[ACZ][FSI?](eq|max|min|E)?[_(dt|Ns|Nm|Nh)][:bands:[N/M:]fmin-fmax]
 | `_Nm`  | Moving N-minute window (e.g. `_1m`) |
 | `_Nh`  | Moving N-hour window (e.g. `_1h`) |
 
+A moving-window metric reads `nan` until a full window of data has accumulated
+(e.g. `LZeq_30s` logs `nan` for its first 30 s) rather than ramping up from a
+partially filled window; an accumulating metric reads `nan` until its first
+sample. Once enough data is present, real values are reported.
+
 ### Band suffix (optional)
 
 | Suffix | Description |

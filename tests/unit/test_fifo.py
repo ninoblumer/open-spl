@@ -94,3 +94,31 @@ class TestFIFOReset:
         # get() returns oldest-first. After reset (all zeros) + 1 push,
         # the two zero slots are "older" and the pushed value is newest → last.
         np.testing.assert_array_equal(fifo.get(), [[0.0, 0.0, 9.0]])
+
+
+class TestFIFOFill:
+    """The ``fill`` value seeds empty slots and is restored on reset; the moving
+    meters rely on ``fill=np.nan`` so an unfilled window reduces to NaN."""
+
+    def test_default_fill_is_zero(self):
+        fifo = FIFO((1, 3))
+        np.testing.assert_array_equal(fifo.buffer, [[0.0, 0.0, 0.0]])
+
+    def test_nan_fill_seeds_buffer(self):
+        fifo = FIFO((1, 3), fill=np.nan)
+        assert np.isnan(fifo.buffer).all()
+
+    def test_nan_fill_only_pushed_slots_real(self):
+        fifo = FIFO((1, 3), fill=np.nan)
+        fifo.push(np.array([5.0]))
+        # one real slot, two still NaN → any reduction over the buffer is NaN
+        assert np.isnan(fifo.buffer).sum() == 2
+        assert np.isnan(np.add.reduce(fifo.buffer, axis=1))[0]
+
+    def test_reset_restores_fill_value(self):
+        fifo = FIFO((1, 3), fill=np.nan)
+        fifo.push(np.array([1.0]))
+        fifo.push(np.array([2.0]))
+        fifo.reset()
+        assert np.isnan(fifo.buffer).all()
+        assert fifo.index == 0
