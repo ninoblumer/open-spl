@@ -1,0 +1,28 @@
+XL2 Sound Level Meter Broadband Reporting:		slm-test-02\2026-06-29_SLM_002_123_Report.txt
+------------------------------------------
+
+
+# Hardware Configuration
+	Device Info:    	XL2, SNo. A2A-12975-E4, FW4.71 Type Approved
+	Mic Type:       	NTi Audio M2340, SNo. 1212, User calibrated 2026-06-29  13:39
+	Mic Sensitivity:	44.2 mV/Pa
+	Time Zone:      	UTC+01:00
+
+# Measurement Setup
+	Profile:        	Full mode
+	Append mode:    	OFF
+	Timer mode:     	single
+	Timer set:      	00:01:00
+	k1:             	0.0 dB
+	k2:             	0.0 dB
+	kset Date:      	k-Values not measured
+	Range:          	0 - 100 dB
+
+# Broadband Results
+	Start       	          	Stop        	          
+	Date        	Time      	Date        	Time      	LASmax  	LASmin  	LAFmax  	LAFmin  	LAImax  	LAImin  	LAeq    	Prev_LAeq	LAeq5"  	LAeq5"max	LAeq10" 	LAeq10"max	LAeq15" 	LAeq15"max	LAeq1'  	LAeq1'max	LAIeq   	LAE     	LAPKmax 	LAFT3eq 	LAFT5eq 	LCSmax  	LCSmin  	LCFmax  	LCFmin  	LCImax  	LCImin  	LCeq    	Prev_LCeq	LCeq5"  	LCeq5"max	LCeq10" 	LCeq10"max	LCeq15" 	LCeq15"max	LCeq1'  	LCeq1'max	LCIeq   	LCE     	LCPKmax 	LZSmax  	LZSmin  	LZFmax  	LZFmin  	LZImax  	LZImin  	LZeq    	Prev_LZeq	LZIeq   	LZE     	LZPKmax 	LAFT5eq-LAeq	LAIeq-LAeq	LCeq-LAeq	LAF1.0% 	LAF5.0% 	LAF10.0%	LAF50.0%	LAF90.0%	LAF95.0%	LAF99.0%	ImpPen_max	Low(eq/peak)	Overload
+	[YYYY-MM-DD]	[hh:mm:ss]	[YYYY-MM-DD]	[hh:mm:ss]	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]     	[dB]    	[dB]     	[dB]    	[dB]      	[dB]    	[dB]      	[dB]    	[dB]     	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]     	[dB]    	[dB]     	[dB]    	[dB]      	[dB]    	[dB]      	[dB]    	[dB]     	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]     	[dB]    	[dB]    	[dB]    	[dB]        	[dB]      	[dB]     	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]    	[dB]      	            	        
+	2026-06-29  	14:02:16  	2026-06-29  	14:03:16  	25.6    	23.2    	28.3    	22.7    	30.6    	23.6    	24.1    	-.-      	23.7    	24.9     	23.7    	24.7      	23.8    	24.5      	24.1    	24.1     	25.2    	41.9    	46.5    	25.3    	25.5    	44.0    	30.3    	49.9    	27.8    	51.9    	32.4    	35.6    	-.-      	36.5    	39.6     	36.8    	37.4      	36.4    	36.5      	35.6    	35.6     	39.7    	53.4    	57.5    	52.4    	39.8    	58.5    	36.0    	60.9    	43.1    	44.0    	-.-      	49.8    	61.8    	63.8    	1.4         	1.2       	11.5     	26.2    	25.1    	24.8    	23.9    	23.3    	23.1    	22.9    	1.6       	A--/---     	        
+
+#CheckSum
+	5990F2B47D162AD46C08632562268D5A
