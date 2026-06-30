@@ -41,10 +41,9 @@ OUT.mkdir(exist_ok=True)
 
 
 def save(fig, name: str) -> None:
-    fig.savefig(OUT / f"{name}.pdf", bbox_inches="tight")
     fig.savefig(OUT / f"{name}.png", bbox_inches="tight", dpi=300)
     plt.close(fig)
-    print(f"  saved {name}.pdf / .png")
+    print(f"  saved {name}.png")
 
 
 # ── colour / style maps ───────────────────────────────────────────────────────

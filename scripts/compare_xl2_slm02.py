@@ -7,16 +7,13 @@ report / log / RTA files.
 
 Calibration
 -----------
-SLM_000 is a 94 dB / 1 kHz calibrator tone. We derive the controller sensitivity
-from it (``calibrate_from_file``) and pin every other recording to it. Because each
-WAV is normalised to its own full-scale range (the ``FSxxx.xdB(PK)`` filename
-annotation), the cal tone only fixes one range directly; the others are scaled by
-the *same* device-level calibration offset:
+Each recording's sensitivity is taken directly from its own ``FSxxx.xdB(PK)``
+full-scale annotation:
 
-    sensitivity_i = sensitivity_from_fs(fs_db_i) * (sens_cal / sensitivity_from_fs(fs_db_000))
+    sensitivity_i = sensitivity_from_fs(fs_db_i)
 
-The ratio is the residual error of the nominal FS annotation (rounding, mic
-sensitivity) and is range-independent on a calibrated Class-1 meter.
+Every recording is scaled by its own range, so the different-range SLM_002
+(FS111.0) is handled correctly.
 
 What is compared
 ----------------
@@ -31,10 +28,14 @@ Not compared (not implemented in the SLM / out of scope): percentiles (LAFn%),
 the impulse-equivalent family (LAIeq, measure "eq" forbids a time-weighting
 letter), and the XL2's derived columns (LCeq-LAeq etc.).
 
-No corrections are applied: Z weighting is flat PluginZWeighting (the SLM's
-actual implementation, correct per IEC 61672-1 Annex E.5), broadband and per-band
-alike. The SLM output is reported as-is and any disagreement with the XL2 is
-shown raw.
+A 4th-order Butterworth infrasound high-pass (PluginHPF, fc = INFRASOUND_HPF_FC,
+5 Hz) is inserted into the BROADBAND metering chains (report, per-second log,
+moving Leq) to suppress sub-audio energy that flat Z would otherwise integrate
+(e.g. the wind/structural infrasound dominating the quiet background recording),
+matching the XL2's broadband Z roll-off. The RTA / octave path is left unfiltered
+because the XL2's RTA has no sub-sonic filter. Apart from that high-pass, no
+corrections are applied: Z weighting is flat PluginZWeighting (correct per IEC
+61672-1 Annex E.5), broadband and per-band alike.
 
 Usage::
 
@@ -53,14 +54,15 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root → 'util'
 
-from slm.app.cli import calibrate_from_file
 from slm.constants import REFERENCE_PRESSURE
 from slm.engine import Engine
 from slm.frequency_weighting import (
-    PluginAWeighting, PluginCWeighting, PluginZWeighting,
+    PluginAWeighting, PluginCWeighting, PluginZWeighting, PluginHPF,
 )
 from slm.io.file_controller import FileController
-from slm.meter import LeqAccumulator, MaxAccumulator, MinAccumulator, LEAccumulator
+from slm.meter import (
+    LeqAccumulator, MaxAccumulator, MinAccumulator, LEAccumulator, LeqMovingMeter,
+)
 from slm.octave_band import PluginOctaveBand
 from slm.time_weighting import (
     PluginFastTimeWeighting, PluginSlowTimeWeighting, PluginImpulseTimeWeighting,
@@ -69,6 +71,14 @@ from slm.time_weighting import (
 from util.xl2 import XL2_SLM_File
 
 DATA_DIR = Path("data/slm-test-02")
+
+# The XL2 WAVs are 170 samples longer than their integer-second log duration.
+# Skipping that surplus at the FRONT was tested and *degraded* the per-second
+# alignment (notably the transient-rich hammering recording, max error 0.10 ->
+# 0.55 dB), which indicates the WAV start already aligns with the XL2's first
+# logged second and the surplus is a trailing tail. So no samples are skipped.
+# (Set >0 to drop that many leading samples; 0 disables.)
+WAV_SKIP_SAMPLES = 0
 
 # Weightings: A, C, and flat Z (no XL2 modeling).
 WEIGHTINGS = (("A", PluginAWeighting), ("C", PluginCWeighting), ("Z", PluginZWeighting))
@@ -84,6 +94,16 @@ _TW_CLS = {
     "S": PluginSlowTimeWeighting,
     "I": PluginImpulseTimeWeighting,
 }
+
+# Infrasound high-pass (Butterworth) applied to the BROADBAND metering chains only
+# (whole-measurement report, per-second log, moving Leq). It suppresses sub-audio
+# energy that flat Z would otherwise integrate (e.g. the wind/structural
+# infrasound dominating the quiet background recording), matching the XL2's
+# broadband Z roll-off. The RTA / octave-band path is NOT filtered: the XL2's RTA
+# has no sub-sonic filter (its band sums agree with the unfiltered SLM to <0.1 dB),
+# and the lowest 1/3-octave band already excludes most of the infrasound.
+INFRASOUND_HPF_FC = 5.0      # Hz
+INFRASOUND_HPF_ORDER = 4
 
 
 # --------------------------------------------------------------------------- #
@@ -125,9 +145,9 @@ class Recording:
 def discover(data_dir: Path) -> dict[str, Recording]:
     """Find every SLM_NNN recording in *data_dir* and parse its reference files."""
     labels = {
-        "SLM_000": "94 dB / 1 kHz calibrator tone",
-        "SLM_001": "Pink noise, moving source + moving mic",
-        "SLM_002": "Background noise (room)",
+        "SLM_000": "94 dB / 1 kHz calibration tone",
+        "SLM_001": "Pink noise",
+        "SLM_002": "Background noise",
         "SLM_003": "Tapping machine",
         "SLM_004": "Manual hammering",
     }
@@ -156,18 +176,17 @@ def discover(data_dir: Path) -> dict[str, Recording]:
 
 
 def calibrate(recordings: dict[str, Recording]) -> None:
-    """Pin every recording's sensitivity to the SLM_000 cal tone (see module docstring)."""
-    cal = recordings["SLM_000"]
-    sens_cal = calibrate_from_file(str(cal.wav), cal_freq=1000.0, cal_level=94.0)
-    ratio = sens_cal / sensitivity_from_fs(cal.fs_db)
-    offset_db = 20 * np.log10(ratio)
-    print("Calibration (from SLM_000, 94 dB @ 1 kHz)")
-    print(f"  sensitivity (cal tone)     : {sens_cal:.6g} V/Pa")
-    print(f"  sensitivity (FS annotation): {sensitivity_from_fs(cal.fs_db):.6g} V/Pa")
-    print(f"  residual FS offset         : {offset_db:+.3f} dB "
-          f"(applied to all recordings)\n")
+    """Set every recording's sensitivity from its own FS annotation.
+
+    Each recording's sensitivity is taken directly from its ``FSxxx.xdB(PK)``
+    full-scale annotation, so every recording is scaled by its own range (the
+    different-range SLM_002, FS111.0, is handled correctly).
+    """
+    print("Calibration (FS annotation)")
     for rec in recordings.values():
-        rec.sensitivity = sensitivity_from_fs(rec.fs_db) * ratio
+        rec.sensitivity = sensitivity_from_fs(rec.fs_db)
+        print(f"  {rec.name}: FS{rec.fs_db} -> {rec.sensitivity:.6g} V/Pa")
+    print()
 
 
 # --------------------------------------------------------------------------- #
@@ -177,6 +196,13 @@ def calibrate(recordings: dict[str, Recording]) -> None:
 def _controller(rec: Recording, blocksize: int) -> FileController:
     c = FileController(str(rec.wav), blocksize=blocksize)
     c.set_sensitivity(rec.sensitivity, unit="V")
+    if WAV_SKIP_SAMPLES:
+        # The XL2 WAVs run WAV_SKIP_SAMPLES past the integer-second log grid;
+        # assuming that surplus is a lead-in, drop it so block 0 lands on the
+        # XL2's first logged second. Seek the file and rebuild the block stream.
+        c._sf.seek(WAV_SKIP_SAMPLES)
+        c._stream = c._sf.blocks(blocksize=blocksize, overlap=0,
+                                 fill_value=0.0, always_2d=True)
     return c
 
 
@@ -189,6 +215,19 @@ def _run(controller, bus_processors) -> None:
             break
         for proc in bus_processors:
             proc(block.T)
+
+
+def _metering_source(bus):
+    """Frequency-weighting output with the infrasound high-pass inserted.
+
+    Used by the broadband metering chains (report, per-second log, moving Leq) so
+    the Butterworth sub-audio high-pass is applied there. The RTA / octave path
+    deliberately bypasses this and reads ``bus.frequency_weighting`` directly.
+    """
+    return bus.add_plugin(PluginHPF(
+        fc=INFRASOUND_HPF_FC, order=INFRASOUND_HPF_ORDER,
+        input=bus.frequency_weighting, zero_zi=True,
+    ))
 
 
 def compute_broadband(rec: Recording, blocksize: int = 1024,
@@ -210,7 +249,7 @@ def compute_broadband(rec: Recording, blocksize: int = 1024,
 
     for w, w_cls in WEIGHTINGS:
         bus = engine.add_bus(w, w_cls)
-        fw = bus.frequency_weighting
+        fw = _metering_source(bus)
 
         # eq / SEL / peak from the squared (Pa²) pressure.
         sq = bus.add_plugin(PluginSquare(input=fw, zero_zi=True))
@@ -256,7 +295,7 @@ def compute_interval_eq(rec: Recording, w_cls, dt: float = 1.0,
     controller = _controller(rec, blocksize)
     engine = Engine(controller, dt=1e9)
     bus = engine.add_bus("bus", w_cls)
-    sq = bus.add_plugin(PluginSquare(input=bus.frequency_weighting, zero_zi=True))
+    sq = bus.add_plugin(PluginSquare(input=_metering_source(bus), zero_zi=True))
     meter = sq.create_meter(LeqAccumulator, name="eq")
 
     interval = int(round(dt * controller.samplerate))
@@ -276,11 +315,101 @@ def compute_interval_eq(rec: Recording, w_cls, dt: float = 1.0,
     return np.array(out)
 
 
+def compute_interval_metrics(rec: Recording, w_cls, dt: float = 1.0,
+                             blocksize: int = 4800) -> dict[str, np.ndarray]:
+    """Per-interval metric series for one weighting, all in a single pass.
+
+    Returns a dict of equal-length arrays (one value per *dt* interval):
+    ``eq`` (LWeq_dt), ``peak`` (LWPKmax_dt), ``Fmax``/``Fmin`` (LWF max/min_dt),
+    ``Smax``/``Smin`` (LWS max/min_dt).
+
+    Only the meter accumulators are reset at each interval boundary; the
+    time-weighting filter state persists, so it stays warm across intervals.
+    The very first interval is therefore a cold-start transient for the F/S
+    max/min detectors (the filters begin at zero); callers that compare against
+    the XL2 (whose detectors were already running) should discard it.
+    """
+    controller = _controller(rec, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", w_cls)
+    fw = _metering_source(bus)
+
+    sq = bus.add_plugin(PluginSquare(input=fw, zero_zi=True))
+    sq.create_meter(LeqAccumulator, name="eq")
+    sq.create_meter(MaxAccumulator, name="peak")
+    fast = bus.add_plugin(PluginFastTimeWeighting(input=fw, zero_zi=True))
+    fast.create_meter(MaxAccumulator, name="max")
+    fast.create_meter(MinAccumulator, name="min")
+    slow = bus.add_plugin(PluginSlowTimeWeighting(input=fw, zero_zi=True))
+    slow.create_meter(MaxAccumulator, name="max")
+    slow.create_meter(MinAccumulator, name="min")
+
+    reads = [("eq", sq, "eq"), ("peak", sq, "peak"),
+             ("Fmax", fast, "max"), ("Fmin", fast, "min"),
+             ("Smax", slow, "max"), ("Smin", slow, "min")]
+    meters = [sq.meters["eq"], sq.meters["peak"], fast.meters["max"],
+              fast.meters["min"], slow.meters["max"], slow.meters["min"]]
+
+    interval = int(round(dt * controller.samplerate))
+    out: dict[str, list[float]] = {name: [] for name, _, _ in reads}
+    n_acc = 0
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+        n_acc += blocksize
+        if n_acc >= interval:
+            for name, plugin, meter in reads:
+                out[name].append(float(plugin.read_db(meter)[0]))
+            for m in meters:
+                m.reset()
+            n_acc -= interval
+    return {name: np.array(vals) for name, vals in out.items()}
+
+
+def compute_moving_leq(rec: Recording, w_cls, windows=(5, 10, 15),
+                       dt: float = 1.0, blocksize: int = 4800) -> dict[int, np.ndarray]:
+    """Per-second trailing moving Leq for each window length, via the SLM's own
+    moving-Leq meters (``LeqMovingMeter``).
+
+    Each meter holds an exact ``round(t*fs)``-sample rolling window and nan-fills
+    until it is full, so every series is NaN for the first *window* seconds and the
+    full-window trailing Leq thereafter. Returns ``{window_seconds: np.ndarray}``.
+    """
+    controller = _controller(rec, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", w_cls)
+    sq = bus.add_plugin(PluginSquare(input=_metering_source(bus), zero_zi=True))
+    for w in windows:
+        sq.create_meter(LeqMovingMeter, name=f"m{w}", t=float(w))
+
+    interval = int(round(dt * controller.samplerate))
+    out: dict[int, list[float]] = {w: [] for w in windows}
+    n_acc = 0
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+        n_acc += blocksize
+        if n_acc >= interval:
+            for w in windows:
+                out[w].append(float(sq.read_db(f"m{w}")[0]))
+            n_acc -= interval
+    return {w: np.array(vals) for w, vals in out.items()}
+
+
 def compute_octave_lzeq(rec: Recording, blocksize: int = 1024) -> tuple[np.ndarray, list[str]]:
     """Whole-file 1/3-octave LZeq spectrum (flat Z), 6.3 Hz – 20 kHz (36 bands)."""
     controller = _controller(rec, blocksize)
     engine = Engine(controller, dt=1e9)
     bus = engine.add_bus("Z", PluginZWeighting)
+    # No infrasound HPF here: the XL2's RTA path has no sub-sonic filter, and the
+    # lowest band (6.3 Hz) already excludes most of the infrasound (see the
+    # INFRASOUND_HPF note). Filtering would only drag the lowest bands down.
     octave = bus.add_plugin(PluginOctaveBand(
         limits=(6.3, 20000), bands_per_oct=3.0,
         input=bus.frequency_weighting, zero_zi=True,
@@ -439,10 +568,10 @@ def main() -> int:
     args = ap.parse_args()
 
     recordings = discover(args.data_dir)
-    if "SLM_000" not in recordings:
-        raise SystemExit("SLM_000 (calibration tone) not found — cannot calibrate.")
     calibrate(recordings)
 
+    # SLM_000 is the bare calibrator tone — calibrated like the rest, but not
+    # itself a meaningful comparison target.
     keys = [k for k in recordings if k != "SLM_000"]
     if args.only:
         keys = [k for k in keys if k in args.only]
