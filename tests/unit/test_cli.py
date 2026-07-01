@@ -958,3 +958,146 @@ class TestSLMShellCompleteFile:
         shell = SLMShell()
         results = shell.complete_file("/nonexistent_path_xyz/", "", 0, 0)
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# CLI arg parsing — --display flag
+# ---------------------------------------------------------------------------
+
+class TestCLIArgParsingDisplay:
+
+    def _parser(self):
+        from slm.app.__main__ import _build_parser
+        return _build_parser()
+
+    def test_display_default_is_plain(self):
+        args = self._parser().parse_args(["--file", "f.wav", "--measure", "LAeq"])
+        assert args.display == "plain"
+
+    def test_display_bars_parses(self):
+        args = self._parser().parse_args(
+            ["--file", "f.wav", "--measure", "LAeq", "--display", "bars"]
+        )
+        assert args.display == "bars"
+
+    def test_display_invalid_choice_rejected(self):
+        with pytest.raises(SystemExit):
+            self._parser().parse_args(
+                ["--file", "f.wav", "--measure", "LAeq", "--display", "fancy"]
+            )
+
+    def test_display_forwarded_to_runner(self, tmp_path):
+        """main() one-shot generator run forwards --display to the runner."""
+        from slm.app.__main__ import main
+        import sys
+        argv = ["slm", "--generator", "--measure", "LAeq", "--sensitivity-mv", "50",
+                "--display", "bars", "--output", str(tmp_path / "r")]
+        with patch("slm.app.cli.run_noise_measurement") as m, \
+                patch.object(sys, "argv", argv):
+            main()
+        assert m.call_args.kwargs["display_mode"] == "bars"
+
+
+# ---------------------------------------------------------------------------
+# CLI arg parsing — --samplerate / --blocksize
+# ---------------------------------------------------------------------------
+
+class TestCLIArgParsingSamplerate:
+
+    def _parser(self):
+        from slm.app.__main__ import _build_parser
+        return _build_parser()
+
+    def test_samplerate_default(self):
+        from slm.io.controller import Controller
+        args = self._parser().parse_args(["--file", "f.wav", "--measure", "LAeq"])
+        assert args.samplerate == Controller.DEFAULT_SAMPLERATE
+
+    def test_samplerate_flag_parses(self):
+        args = self._parser().parse_args(
+            ["--generator", "--measure", "LAeq", "--samplerate", "44100"]
+        )
+        assert args.samplerate == 44100
+
+
+# ---------------------------------------------------------------------------
+# SLMShell — samplerate / blocksize commands
+# ---------------------------------------------------------------------------
+
+class TestSLMShellSamplerate:
+
+    def test_default_matches_controller(self):
+        from slm.io.controller import Controller
+        shell = SLMShell()
+        assert shell._samplerate == Controller.DEFAULT_SAMPLERATE
+
+    def test_no_arg_shows_current(self, capsys):
+        shell = SLMShell()
+        shell.do_samplerate("")
+        assert str(shell._samplerate) in capsys.readouterr().out
+
+    def test_sets_value(self, capsys):
+        shell = SLMShell()
+        shell.do_samplerate("44100")
+        capsys.readouterr()
+        assert shell._samplerate == 44100
+
+    def test_zero_rejected(self, capsys):
+        shell = SLMShell()
+        original = shell._samplerate
+        shell.do_samplerate("0")
+        assert "Invalid" in capsys.readouterr().out
+        assert shell._samplerate == original
+
+    def test_text_rejected(self, capsys):
+        shell = SLMShell()
+        shell.do_samplerate("fast")
+        assert "Invalid" in capsys.readouterr().out
+
+
+class TestSLMShellBlocksize:
+
+    def test_default_matches_controller(self):
+        from slm.io.controller import Controller
+        shell = SLMShell()
+        assert shell._blocksize == Controller.DEFAULT_BLOCKSIZE
+
+    def test_no_arg_shows_current(self, capsys):
+        shell = SLMShell()
+        shell.do_blocksize("")
+        assert str(shell._blocksize) in capsys.readouterr().out
+
+    def test_sets_value(self, capsys):
+        shell = SLMShell()
+        shell.do_blocksize("4096")
+        capsys.readouterr()
+        assert shell._blocksize == 4096
+
+    def test_zero_rejected(self, capsys):
+        shell = SLMShell()
+        original = shell._blocksize
+        shell.do_blocksize("0")
+        assert "Invalid" in capsys.readouterr().out
+        assert shell._blocksize == original
+
+    def test_show_includes_samplerate_and_blocksize(self, capsys):
+        shell = SLMShell()
+        shell._samplerate = 44100
+        shell._blocksize = 4096
+        shell.do_show("")
+        out = capsys.readouterr().out
+        assert "Sample rate" in out and "44100" in out
+        assert "Block size" in out and "4096" in out
+
+    def test_start_forwards_samplerate_and_blocksize(self):
+        """do_start (generator) forwards the shell's samplerate/blocksize."""
+        shell = SLMShell()
+        shell._generator_mode = True
+        shell._sensitivity_v = 0.05
+        shell._config.metrics = ["LAeq"]
+        shell._samplerate = 44100
+        shell._blocksize = 4096
+        with patch("slm.app.cli.run_noise_measurement") as m:
+            shell.do_start("")
+        assert m.call_args.kwargs["samplerate"] == 44100
+        assert m.call_args.kwargs["blocksize"] == 4096

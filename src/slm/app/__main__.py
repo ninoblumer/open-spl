@@ -103,6 +103,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--display", choices=("plain", "bars"), default="plain",
+        help="Console display mode: 'plain' scrolling text (default) or 'bars' "
+             "live-updating bar graph (requires a TTY; falls back to plain)",
+    )
+
+    parser.add_argument(
         "--realtime", "-r", action="store_true",
         help="Simulate real-time playback: pace processing so each dt interval takes dt real seconds",
     )
@@ -230,6 +236,11 @@ def main() -> None:
             config=config,
         )
         shell._device = device
+        shell._display_mode = args.display
+        shell._samplerate = args.samplerate
+        shell._blocksize = args.blocksize
+        if args.realtime:
+            shell._realtime = True
         if args.generator:
             shell._generator_mode = True
         shell.cmdloop()
@@ -310,7 +321,7 @@ def main() -> None:
 
     if args.file:
         run_measurement(args.file, sens, config, print_to_console=True,
-                        blocksize=args.blocksize,
+                        blocksize=args.blocksize, display_mode=args.display,
                         realtime=args.realtime, duration=duration)
     elif args.generator:
         from slm.app.cli import run_noise_measurement
@@ -319,6 +330,7 @@ def main() -> None:
             samplerate=args.samplerate,
             blocksize=args.blocksize,
             print_to_console=True,
+            display_mode=args.display,
             duration=duration,
         )
     else:
@@ -329,6 +341,7 @@ def main() -> None:
             samplerate=args.samplerate,
             blocksize=args.blocksize,
             print_to_console=True,
+            display_mode=args.display,
             duration=duration,
         )
 
