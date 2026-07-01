@@ -319,8 +319,9 @@ def run_realtime_measurement(
 class SLMShell(cmd.Cmd):
     """Interactive SLM REPL.
 
-    Commands: add, remove, file, sensitivity, calibrate, output, name, warmup,
-              dt, show, save, load, start, display, tree, inspect, exit/quit/EOF.
+    Commands: add, remove, file, device, generator, sensitivity, calibrate,
+              output, name, warmup, dt, queue, samplerate, blocksize, show, save,
+              load, start, display, realtime, tree, inspect, exit/quit/EOF.
     """
 
     intro = (
@@ -349,6 +350,8 @@ class SLMShell(cmd.Cmd):
         self._realtime: bool = False
         self._device: int | str | None = None
         self._generator_mode: bool = False
+        self._samplerate: int = Controller.DEFAULT_SAMPLERATE
+        self._blocksize: int = Controller.DEFAULT_BLOCKSIZE
 
     def emptyline(self) -> bool:
         """Do nothing on an empty line.
@@ -657,6 +660,53 @@ Examples:
         self._config.queue_maxsize = n
         print(f"  Queue max: {n} blocks")
 
+    def do_samplerate(self, arg: str) -> None:
+        """samplerate HZ — set the sample rate for real-time (device/generator) input.
+
+Ignored for file input, where the sample rate is read from the WAV header.
+
+Examples:
+  samplerate         show current setting
+  samplerate 48000   request 48 kHz (default)
+"""
+        arg = arg.strip()
+        if not arg:
+            print(f"  Sample rate: {self._samplerate} Hz")
+            return
+        try:
+            hz = int(arg)
+            if hz < 1:
+                raise ValueError
+        except ValueError:
+            print(f"Invalid value: {arg!r}  (must be a positive integer)")
+            return
+        self._samplerate = hz
+        print(f"  Sample rate: {hz} Hz")
+
+    def do_blocksize(self, arg: str) -> None:
+        """blocksize SAMPLES — set the processing block size in samples.
+
+Smaller blocks lower latency for real-time input; larger blocks reduce
+per-block overhead.  Does not affect measured levels.
+
+Examples:
+  blocksize        show current setting
+  blocksize 1024   default
+"""
+        arg = arg.strip()
+        if not arg:
+            print(f"  Block size: {self._blocksize} samples")
+            return
+        try:
+            n = int(arg)
+            if n < 1:
+                raise ValueError
+        except ValueError:
+            print(f"Invalid value: {arg!r}  (must be a positive integer)")
+            return
+        self._blocksize = n
+        print(f"  Block size: {n} samples")
+
     def do_show(self, _: str) -> None:
         """show — display the current configuration."""
         if self._generator_mode:
@@ -672,6 +722,8 @@ Examples:
         print(f"  Sensitivity: {'(not set)' if self._sensitivity_v is None else self._sensitivity_v}")
         print(f"  dt:          {self._config.dt} s")
         print(f"  Warm-up:     {self._config.warmup} s")
+        print(f"  Sample rate: {self._samplerate} Hz")
+        print(f"  Block size:  {self._blocksize} samples")
         print(f"  Queue max:   {self._config.queue_maxsize} blocks")
         print(f"  Output dir:  {out_path.parent}")
         print(f"  Name:        {out_path.name}")
@@ -911,6 +963,8 @@ next whole block (blocksize/fs).
             run_noise_measurement(
                 self._sensitivity_v,
                 self._config,
+                samplerate=self._samplerate,
+                blocksize=self._blocksize,
                 print_to_console=True,
                 display_mode=self._display_mode,
                 duration=duration,
@@ -921,6 +975,7 @@ next whole block (blocksize/fs).
                 self._sensitivity_v,
                 self._config,
                 print_to_console=True,
+                blocksize=self._blocksize,
                 display_mode=self._display_mode,
                 realtime=self._realtime,
                 duration=duration,
@@ -930,6 +985,8 @@ next whole block (blocksize/fs).
                 self._sensitivity_v,
                 self._config,
                 device=self._device,
+                samplerate=self._samplerate,
+                blocksize=self._blocksize,
                 print_to_console=True,
                 display_mode=self._display_mode,
                 duration=duration,

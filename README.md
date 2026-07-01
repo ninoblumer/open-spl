@@ -66,6 +66,13 @@ up to the next block edge:
 python -m slm --file recording.wav --fs-db 128.1 --blocksize 4800 --measure LAeq --dt 1.0
 ```
 
+Use `--display bars` for a live-updating bar graph instead of the default scrolling
+`plain` text (needs a TTY; falls back to plain otherwise):
+
+```bash
+python -m slm --device 0 --sensitivity-mv 50 --measure LAeq:bands:63-8000 --display bars
+```
+
 **Sensitivity flags** (mutually exclusive):
 
 | Flag | Argument | Use when… |
@@ -99,8 +106,11 @@ opens — handy when you have a fixed setup but still want to adjust before runn
 python -m slm -i --file recording.wav --fs-db 128.1 --config config.toml
 ```
 
-Key REPL commands: `file`, `device`, `sensitivity`, `calibrate`, `add`, `remove`, `dt`,
-`output`, `name`, `warmup`, `realtime`, `display`, `show`, `tree`, `save`, `load`, `start`.
+Key REPL commands: `file`, `device`, `generator`, `sensitivity`, `calibrate`, `add`,
+`remove`, `dt`, `output`, `name`, `warmup`, `queue`, `samplerate`, `blocksize`, `realtime`,
+`display`, `show`, `tree`, `inspect`, `save`, `load`, `start`. The `samplerate` and
+`blocksize` commands mirror the `--samplerate`/`--blocksize` CLI flags (sample rate applies
+to device/generator input only; for a WAV file it is read from the header).
 
 `output DIR` sets the directory results are written to, and `name NAME` sets the
 measurement name (the output file stem); files are written to `DIR/NAME_report.csv`,
