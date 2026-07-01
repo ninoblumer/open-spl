@@ -19,8 +19,12 @@ except ImportError as _exc: # pragma: no cover
     ) from _exc
 
 from slm.constants import CALIBRATION_LEVEL_DB
-from slm.io.controller import Controller
-from slm.io.realtime_controller import RealtimeController
+from slm.io.realtime_controller import (
+    DEFAULT_BLOCKSIZE,
+    DEFAULT_QUEUE_MAXSIZE,
+    DEFAULT_SAMPLERATE,
+    RealtimeController,
+)
 
 
 class SounddeviceController(RealtimeController):
@@ -46,17 +50,17 @@ class SounddeviceController(RealtimeController):
     queue_maxsize:
         Maximum number of blocks buffered between the callback and
         :meth:`read_block`.  If the engine falls behind, excess blocks are
-        dropped and :attr:`overruns` is incremented (default 64).
+        dropped and :attr:`overruns` is incremented (default 0 = unbounded).
     """
 
     def __init__(
         self,
         device: int | str | None = None,
-        samplerate: int = Controller.DEFAULT_SAMPLERATE,
-        blocksize: int = Controller.DEFAULT_BLOCKSIZE,
+        samplerate: int = DEFAULT_SAMPLERATE,
+        blocksize: int = DEFAULT_BLOCKSIZE,
         channels: int = 1,
         dtype: str = "float32",
-        queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE,
+        queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
         **kwargs,
     ) -> None:
         if channels > 1:

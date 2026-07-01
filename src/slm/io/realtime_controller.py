@@ -11,6 +11,15 @@ import numpy as np
 
 from slm.io.controller import Controller
 
+# ---------------------------------------------------------------------------
+# Shared audio defaults — the single source of truth for these values.
+# Every other module (controllers, config, CLI, tests) imports them from here
+# instead of hardcoding literals.
+# ---------------------------------------------------------------------------
+DEFAULT_SAMPLERATE: int = 48_000
+DEFAULT_BLOCKSIZE: int = 1_024
+DEFAULT_QUEUE_MAXSIZE: int = 0  # zero means infinite queue size -> no bound on latency
+
 
 class RealtimeController(Controller):
     """Base class for queue-backed real-time audio controllers.
@@ -29,8 +38,6 @@ class RealtimeController(Controller):
     queue_maxsize:
         Maximum queued blocks before the producer drops and counts an overrun.
     """
-
-    DEFAULT_QUEUE_MAXSIZE: int = 64
 
     def __init__(
         self,

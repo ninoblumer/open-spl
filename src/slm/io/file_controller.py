@@ -7,6 +7,7 @@ import numpy as np
 import soundfile as sf
 
 from slm.io.controller import Controller
+from slm.io.realtime_controller import DEFAULT_BLOCKSIZE
 
 
 class FileController(Controller):
@@ -26,7 +27,7 @@ class FileController(Controller):
     _overruns: int
 
 
-    def __init__(self, filename: str | Path, blocksize: int = 1024, overlap: int = 0,
+    def __init__(self, filename: str | Path, blocksize: int = DEFAULT_BLOCKSIZE, overlap: int = 0,
                  realtime: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._sf = None

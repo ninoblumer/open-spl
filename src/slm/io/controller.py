@@ -8,9 +8,6 @@ from slm.constants import CALIBRATION_LEVEL_DB
 
 
 class Controller(ABC):
-    DEFAULT_SAMPLERATE: int = 48_000
-    DEFAULT_BLOCKSIZE: int = 1_024
-
     def __init__(self, **kwargs):
         super().__init__()
         self._counter = itertools.count(0)

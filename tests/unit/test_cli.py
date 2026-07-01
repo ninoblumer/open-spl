@@ -274,10 +274,10 @@ class TestCLIArgParsing:
 
     def test_blocksize_default(self):
         from slm.app.__main__ import _build_parser
-        from slm.io.controller import Controller
+        from slm.io.realtime_controller import DEFAULT_BLOCKSIZE
         parser = _build_parser()
         args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
-        assert args.blocksize == Controller.DEFAULT_BLOCKSIZE
+        assert args.blocksize == DEFAULT_BLOCKSIZE
 
     def test_blocksize_flag_parses(self):
         from slm.app.__main__ import _build_parser
@@ -533,11 +533,12 @@ class TestSLMConfigQueueMaxsize:
         loaded = SLMConfig.from_toml(path)
         assert loaded.queue_maxsize == 16
 
-    def test_queue_maxsize_zero_raises(self, tmp_path):
+    def test_queue_maxsize_zero_valid(self, tmp_path):
+        # 0 means an unbounded queue, so it is a valid setting.
         path = tmp_path / "cfg.toml"
         path.write_text("[measurement]\nqueue_maxsize = 0\n", encoding="utf-8")
-        with pytest.raises(ValueError, match="queue_maxsize"):
-            SLMConfig.from_toml(path)
+        loaded = SLMConfig.from_toml(path)
+        assert loaded.queue_maxsize == 0
 
     def test_queue_maxsize_negative_raises(self, tmp_path):
         path = tmp_path / "cfg.toml"
@@ -673,13 +674,11 @@ class TestSLMShellQueue:
         shell.do_queue("1")
         assert shell._config.queue_maxsize == 1
 
-    def test_queue_zero_rejected(self, capsys):
+    def test_queue_zero_valid(self):
+        # 0 means an unbounded queue, so the shell accepts it.
         shell = SLMShell()
-        original = shell._config.queue_maxsize
         shell.do_queue("0")
-        out = capsys.readouterr().out
-        assert "Invalid" in out
-        assert shell._config.queue_maxsize == original  # unchanged
+        assert shell._config.queue_maxsize == 0
 
     def test_queue_negative_rejected(self, capsys):
         shell = SLMShell()

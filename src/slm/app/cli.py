@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
 from slm.io.controller import Controller
+from slm.io.realtime_controller import DEFAULT_BLOCKSIZE, DEFAULT_SAMPLERATE
 from slm.io.thread_priority import high_priority
 
 if TYPE_CHECKING:
@@ -103,7 +104,7 @@ def calibrate_from_file(
     wav_path: str | Path,
     cal_freq: float = CALIBRATION_FREQ_HZ,
     cal_level: float = CALIBRATION_LEVEL_DB,
-    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
+    blocksize: int = DEFAULT_BLOCKSIZE,
 ) -> float:
     """Derive controller sensitivity from a calibrator-tone WAV recording.
 
@@ -127,8 +128,8 @@ def calibrate_from_file(
 
 def calibrate_from_device(
     device: int | str | None = None,
-    samplerate: int = Controller.DEFAULT_SAMPLERATE,
-    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
+    samplerate: int = DEFAULT_SAMPLERATE,
+    blocksize: int = DEFAULT_BLOCKSIZE,
     cal_freq: float = CALIBRATION_FREQ_HZ,
     cal_level: float = CALIBRATION_LEVEL_DB,
     stability_window: int = 10,
@@ -244,8 +245,8 @@ def run_measurement(
 def run_noise_measurement(
     sensitivity_v: float,
     config: "SLMConfig",
-    samplerate: int = Controller.DEFAULT_SAMPLERATE,
-    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
+    samplerate: int = DEFAULT_SAMPLERATE,
+    blocksize: int = DEFAULT_BLOCKSIZE,
     print_to_console: bool = False,
     display_mode: str = "plain",
     duration: float | None = None,
@@ -281,8 +282,8 @@ def run_realtime_measurement(
     sensitivity_v: float,
     config: "SLMConfig",
     device: int | str | None = None,
-    samplerate: int = Controller.DEFAULT_SAMPLERATE,
-    blocksize: int = Controller.DEFAULT_BLOCKSIZE,
+    samplerate: int = DEFAULT_SAMPLERATE,
+    blocksize: int = DEFAULT_BLOCKSIZE,
     print_to_console: bool = False,
     display_mode: str = "plain",
     duration: float | None = None,
@@ -635,15 +636,16 @@ the value set here.
             print(f"Invalid dt: {arg.strip()!r}")
 
     def do_queue(self, arg: str) -> None:
-        """queue N — set the real-time block queue depth (default: 4).
+        """queue N — set the real-time block queue depth (default: 0 = unbounded).
 
 N blocks are buffered between the audio driver and the engine.  A larger
-value absorbs OS scheduling jitter at the cost of higher latency.  The
-engine reports overruns when this buffer is full.
+finite value absorbs OS scheduling jitter at the cost of higher latency.
+0 means an unbounded queue (no latency bound, no dropped blocks).  The
+engine reports overruns when a finite buffer is full.
 
 Examples:
   queue      show current setting
-  queue 4    tight — sensitive to scheduling spikes (default)
+  queue 0    unbounded — no dropped blocks, latency may grow (default)
   queue 16   generous — absorbs bursts; ~85 ms latency at bs=4096/48 kHz
 """
         arg = arg.strip()
@@ -652,10 +654,10 @@ Examples:
             return
         try:
             n = int(arg)
-            if n < 1:
+            if n < 0:
                 raise ValueError
         except ValueError:
-            print(f"Invalid value: {arg!r}  (must be a positive integer)")
+            print(f"Invalid value: {arg!r}  (must be a non-negative integer; 0 = unbounded)")
             return
         self._config.queue_maxsize = n
         print(f"  Queue max: {n} blocks")
