@@ -123,6 +123,17 @@ def sensitivity_from_fs(fs_db: float) -> float:
     return 1.0 / (10 ** (fs_db / 20) * REFERENCE_PRESSURE)
 
 
+def display_label(name: str) -> str:
+    """Short human-facing recording label: 'SLM_002' or '..._SLM_002' -> 'M02'.
+
+    Display only — the underlying key / ``Recording.name`` (used for file
+    discovery and caching) is unchanged. Falls back to *name* if it carries no
+    ``SLM_NNN`` index.
+    """
+    m = re.search(r"SLM_0*(\d+)", name)
+    return f"M{int(m.group(1)):02d}" if m else name
+
+
 @dataclass
 class Recording:
     """One XL2 dataset: the WAV plus its parsed reference files."""
@@ -185,7 +196,7 @@ def calibrate(recordings: dict[str, Recording]) -> None:
     print("Calibration (FS annotation)")
     for rec in recordings.values():
         rec.sensitivity = sensitivity_from_fs(rec.fs_db)
-        print(f"  {rec.name}: FS{rec.fs_db} -> {rec.sensitivity:.6g} V/Pa")
+        print(f"  {display_label(rec.name)}: FS{rec.fs_db} -> {rec.sensitivity:.6g} V/Pa")
     print()
 
 
@@ -462,13 +473,14 @@ class Row:
     recording: str
     kind: str
     metric: str
-    slm: float
-    xl2: float
+    measured: float
+    reference: float
     tol: float
 
     @property
     def err(self) -> float:
-        return self.slm - self.xl2
+        """Measured − reference (dB)."""
+        return self.measured - self.reference
 
     @property
     def ok(self) -> bool:
@@ -477,6 +489,7 @@ class Row:
 
 def compare_recording(rec: Recording) -> list[Row]:
     rows: list[Row] = []
+    disp = display_label(rec.name)
 
     # --- broadband report scalars ---
     slm_bb = compute_broadband(rec)
@@ -487,7 +500,7 @@ def compare_recording(rec: Recording) -> list[Row]:
         if xl2_val is None:
             continue
         tol = TOL_EQ if metric in eq_set else TOL_PEAK if metric in peak_set else TOL_MAXMIN
-        rows.append(Row(rec.name, "report", metric, slm_val, xl2_val, tol))
+        rows.append(Row(disp, "report", metric, slm_val, xl2_val, tol))
 
     # --- per-second Leq_dt series (robust stats only) ---
     for w, w_cls in WEIGHTINGS:
@@ -499,9 +512,9 @@ def compare_recording(rec: Recording) -> list[Row]:
         if k == 0:
             continue
         err = slm_series[:k] - ref[:k]
-        rows.append(Row(rec.name, "log-series", f"L{w}eq_dt[median|abs]",
+        rows.append(Row(disp, "log-series", f"L{w}eq_dt[median|abs]",
                         float(np.median(np.abs(err))), 0.0, TOL_EQ))
-        rows.append(Row(rec.name, "log-series", f"L{w}eq_dt[p95|abs]",
+        rows.append(Row(disp, "log-series", f"L{w}eq_dt[p95|abs]",
                         float(np.percentile(np.abs(err), 95)), 0.0, TOL_MAXMIN))
 
     # --- 1/3-oct LZeq spectrum (RTA report) ---
@@ -510,7 +523,7 @@ def compare_recording(rec: Recording) -> list[Row]:
         slm_bands, labels = compute_octave_lzeq(rec)
         k = min(len(slm_bands), len(ref))
         for i in range(k):
-            rows.append(Row(rec.name, "rta-LZeq", f"{labels[i]}Hz",
+            rows.append(Row(disp, "rta-LZeq", f"{labels[i]}Hz",
                             float(slm_bands[i]), float(ref[i]), TOL_RTA))
     except (KeyError, AttributeError):
         pass
@@ -519,7 +532,7 @@ def compare_recording(rec: Recording) -> list[Row]:
 
 
 def print_recording(rec: Recording, rows: list[Row]) -> None:
-    print(f"\n{'='*72}\n{rec.name}  -  {rec.label}")
+    print(f"\n{'='*72}\n{display_label(rec.name)}  -  {rec.label}")
     print(f"  FS={rec.fs_db} dB(PK)   sensitivity={rec.sensitivity:.6g} V/Pa")
     by_kind: dict[str, list[Row]] = {}
     for r in rows:
@@ -528,14 +541,14 @@ def print_recording(rec: Recording, rows: list[Row]) -> None:
     for kind, group in by_kind.items():
         print(f"\n  [{kind}]")
         if kind == "log-series":
-            print(f"    {'metric':<22}{'SLM-XL2 stat':>14}{'tol':>8}  flag")
+            print(f"    {'metric':<22}{'measured-reference':>20}{'tol':>8}  flag")
             for r in group:
-                flag = "ok" if r.slm <= r.tol else "HIGH"
-                print(f"    {r.metric:<22}{r.slm:>13.3f} {r.tol:>7.2f}  {flag}")
+                flag = "ok" if r.measured <= r.tol else "HIGH"
+                print(f"    {r.metric:<22}{r.measured:>19.3f} {r.tol:>7.2f}  {flag}")
             continue
-        print(f"    {'metric':<12}{'SLM':>9}{'XL2':>9}{'err':>9}{'tol':>7}  flag")
+        print(f"    {'metric':<12}{'measured':>10}{'reference':>10}{'meas-ref':>10}{'tol':>7}  flag")
         for r in group:
-            print(f"    {r.metric:<12}{r.slm:>9.2f}{r.xl2:>9.2f}{r.err:>+9.2f}"
+            print(f"    {r.metric:<12}{r.measured:>10.2f}{r.reference:>10.2f}{r.err:>+10.2f}"
                   f"{r.tol:>7.2f}  {'PASS' if r.ok else 'FAIL'}")
         worst = max((r for r in group), key=lambda r: abs(r.err), default=None)
         if worst is not None:
@@ -548,15 +561,15 @@ def write_csv(path: Path, all_rows: list[Row]) -> None:
     import csv
     with open(path, "w", newline="", encoding="utf-8") as f:
         wr = csv.writer(f)
-        wr.writerow(["recording", "kind", "metric", "slm_db", "xl2_db", "err_db",
-                     "tol_db", "pass"])
+        wr.writerow(["recording", "kind", "metric", "measured_db", "reference_db",
+                     "measured_minus_reference_db", "tol_db", "pass"])
         for r in all_rows:
             if r.kind == "log-series":
-                wr.writerow([r.recording, r.kind, r.metric, f"{r.slm:.3f}", "",
+                wr.writerow([r.recording, r.kind, r.metric, f"{r.measured:.3f}", "",
                              "", f"{r.tol:.2f}", ""])
             else:
-                wr.writerow([r.recording, r.kind, r.metric, f"{r.slm:.2f}",
-                             f"{r.xl2:.2f}", f"{r.err:+.2f}", f"{r.tol:.2f}",
+                wr.writerow([r.recording, r.kind, r.metric, f"{r.measured:.2f}",
+                             f"{r.reference:.2f}", f"{r.err:+.2f}", f"{r.tol:.2f}",
                              "pass" if r.ok else "fail"])
 
 

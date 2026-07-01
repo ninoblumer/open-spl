@@ -11,9 +11,9 @@ XL2 modelling) are all inherited from that module.
 
 Four figures are produced:
 
-  fig_s1_broadband   — broadband metric differences (SLM - XL2), one panel per
+  fig_s1_broadband   — broadband metric differences (measured - reference), one panel per
                        weighting (A/C/Z), markers per recording.
-  fig_s2_interval_*  — per-second difference (SLM - XL2) vs time, 2x2 recording
+  fig_s2_interval_*  — per-second difference (measured - reference) vs time, 2x2 recording
                        grid, A/C/Z overlaid. One figure per metric: Leq at 1 s,
                        5", 10", 15", then LFmax_dt, LSmax_dt, LFmin_dt, LSmin_dt,
                        Lpeak_dt. The XL2 logs no Z for the 5"/10"/15" windows, so
@@ -59,7 +59,7 @@ C_GREY   = "#555555"
 # ── comparison machinery (single source of truth for the numbers) ─────────────
 from scripts.compare_xl2_slm02 import (
     DATA_DIR, WEIGHTINGS,
-    discover, calibrate,
+    discover, calibrate, display_label,
     compute_broadband, compute_interval_metrics, compute_moving_leq,
     compute_octave_lzeq,
     xl2_report_scalar, xl2_log_series, xl2_rta_lzeq,
@@ -113,7 +113,7 @@ def _fmt_hz(f: float) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FIG S.1 — Broadband metric differences (SLM - XL2), per weighting
+# FIG S.1 — Broadband metric differences (measured - reference), per weighting
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Metric "base" names (weighting letter stripped) in display order.
@@ -173,13 +173,13 @@ def make_fig_s1(recordings) -> plt.Figure:
 
     axes[0].set_ylim(-1.5, 1.5)
     axes[0].yaxis.set_major_locator(ticker.MultipleLocator(0.5))
-    axes[0].set_ylabel("Difference: soundlevelmeter - XL2 (dB)")
+    axes[0].set_ylabel("Difference: measured - reference (dB)")
 
     # Shared recording legend (markers).
     from matplotlib.lines import Line2D
     handles = [Line2D([0], [0], marker=REC_MARKER[k], color=REC_COLOR[k], lw=0,
                       ms=7, markeredgecolor="none",
-                      label=f"{k}  ({recordings[k].label})")
+                      label=f"{display_label(k)}  ({recordings[k].label})")
                for k in PLOT_KEYS]
     fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=8,
                bbox_to_anchor=(0.5, -0.06))
@@ -224,7 +224,7 @@ def _moving_metrics(rec, w: str, w_cls) -> dict[int, np.ndarray]:
 
 def _interval_diff_figure(recordings, *, slm_fn, xl2_col, title,
                           mask: int = 0, ylim=(-0.6, 0.6)) -> plt.Figure:
-    """Per-second difference (SLM - XL2) vs time, 2x2 recording grid, A/C/Z overlaid.
+    """Per-second difference (measured - reference) vs time, 2x2 recording grid, A/C/Z overlaid.
 
     *slm_fn(rec, w, w_cls)* returns the SLM series for one weighting; *xl2_col*
     maps a weighting letter to the matching XL2 log column. The first *mask*
@@ -254,7 +254,7 @@ def _interval_diff_figure(recordings, *, slm_fn, xl2_col, title,
                     ms=2, alpha=0.85, label=w)
         ax.axhline(0, color="black", lw=0.8)
         ax.set_ylim(*ylim)
-        ax.set_title(f"{key} - {rec.label}", fontsize=9)
+        ax.set_title(f"{display_label(key)} - {rec.label}", fontsize=9)
         ax.set_xlabel("Time (s)", fontsize=8)
         ax.set_ylabel(r"$\Delta$ (dB)", fontsize=8)
         if key == PLOT_KEYS[0] and ax.get_legend_handles_labels()[0]:
@@ -270,10 +270,10 @@ def _interval_diff_figure(recordings, *, slm_fn, xl2_col, title,
 # no LZeq5"/10"/15", so the trailing-window figures show A and C only.
 # (seconds, filename suffix, title)
 _LEQ_WINDOW_SPECS = [
-    (1, "leq_1s", r"Per-second (1 s) $L_{eq}$ Difference (SLM - XL2)"),
-    (5, "leq_5s", r'Trailing 5" $L_{eq}$ Difference (SLM - XL2)'),
-    (10, "leq_10s", r'Trailing 10" $L_{eq}$ Difference (SLM - XL2)'),
-    (15, "leq_15s", r'Trailing 15" $L_{eq}$ Difference (SLM - XL2)'),
+    (1, "leq_1s", r"Per-second (1 s) $L_{eq}$ Difference (measured - reference)"),
+    (5, "leq_5s", r'Trailing 5" $L_{eq}$ Difference (measured - reference)'),
+    (10, "leq_10s", r'Trailing 10" $L_{eq}$ Difference (measured - reference)'),
+    (15, "leq_15s", r'Trailing 15" $L_{eq}$ Difference (measured - reference)'),
 ]
 
 
@@ -297,15 +297,15 @@ def _leq_col(secs: int):
 # (filename suffix, metric key, XL2 column fn, title, mask, ylim)
 _INTERVAL_SPECS = [
     ("lfmax_dt", "Fmax", lambda w: f"L{w}Fmax_dt",
-     r"Per-second $L_{F,max,dt}$ Difference (SLM - XL2)", 5, (-1.5, 1.5)),
+     r"Per-second $L_{F,max,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
     ("lsmax_dt", "Smax", lambda w: f"L{w}Smax_dt",
-     r"Per-second $L_{S,max,dt}$ Difference (SLM - XL2)", 5, (-1.5, 1.5)),
+     r"Per-second $L_{S,max,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
     ("lfmin_dt", "Fmin", lambda w: f"L{w}Fmin_dt",
-     r"Per-second $L_{F,min,dt}$ Difference (SLM - XL2)", 5, (-1.5, 1.5)),
+     r"Per-second $L_{F,min,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
     ("lsmin_dt", "Smin", lambda w: f"L{w}Smin_dt",
-     r"Per-second $L_{S,min,dt}$ Difference (SLM - XL2)", 5, (-1.5, 1.5)),
+     r"Per-second $L_{S,min,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
     ("lpeak_dt", "peak", lambda w: f"L{w}PKmax_dt",
-     r"Per-second $L_{peak,dt}$ Difference (SLM - XL2)", 0, (-1.5, 1.5)),
+     r"Per-second $L_{peak,dt}$ Difference (measured - reference)", 0, (-1.5, 1.5)),
 ]
 
 
@@ -347,11 +347,11 @@ def make_fig_s3(recordings) -> plt.Figure:
         x = np.arange(k)
 
         ax.plot(x, ref[:k], color=C_GREY, lw=1.5, ls="--", marker="s", ms=3,
-                label="XL2 reference")
+                label="reference")
         ax.plot(x, slm[:k], color=REC_COLOR[key], lw=1.5, marker="o", ms=3,
-                label="soundlevelmeter")
+                label="measured")
 
-        ax.set_title(f"{key} - {rec.label}", fontsize=9)
+        ax.set_title(f"{display_label(key)} - {rec.label}", fontsize=9)
         ax.set_ylabel(r"$L_{Zeq}$ (dB)", fontsize=8)
         ax.set_xlabel("1/3-octave band centre (Hz)", fontsize=8)
         _set_band_xticks(ax, freqs[:k], x)
@@ -380,7 +380,7 @@ def _set_band_xticks(ax, freqs, x) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def make_fig_s4(recordings) -> plt.Figure:
-    """1/3-octave L_Zeq deviation (SLM - XL2) vs band, all recordings overlaid."""
+    """1/3-octave L_Zeq deviation (measured - reference) vs band, all recordings overlaid."""
     # Use the band grid of the first available recording as the common axis.
     series: list[tuple[str, np.ndarray, np.ndarray]] = []  # key, diff, freqs
     ref_freqs = None
@@ -413,14 +413,15 @@ def make_fig_s4(recordings) -> plt.Figure:
         xi = x[:len(diff)] + xoff
         ax.plot(xi, diff, color=color, lw=0.6, alpha=0.4, zorder=3)
         ax.scatter(xi, diff, color=color, s=22, marker=marker,
-                   linewidths=0, zorder=5, label=f"{key} ({recordings[key].label})")
+                   linewidths=0, zorder=5,
+                   label=f"{display_label(key)} ({recordings[key].label})")
 
     ax.set_xlim(-0.5, n - 0.5)
     ax.set_ylim(-2.0, 2.0)
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
     _set_band_xticks(ax, ref_freqs, x)
     ax.set_xlabel("1/3-octave band centre frequency (Hz)")
-    ax.set_ylabel("Difference: soundlevelmeter - XL2 (dB)")
+    ax.set_ylabel("Difference: measured - reference (dB)")
     ax.set_title("1/3-octave $L_{Zeq}$ Deviation",
                  fontsize=10)
     ax.legend(loc="upper center", fontsize=8, ncol=3)
