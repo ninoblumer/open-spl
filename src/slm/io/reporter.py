@@ -57,8 +57,18 @@ class Reporter:
                             center_frequencies=b.center_frequencies)
 
     def record(self, timestamp: timedelta, dt: float) -> None:
-        """Sample all registered meters and append rows if dt has elapsed since last log."""
-        if self._last_log is not None and (timestamp - self._last_log).total_seconds() < dt:
+        """Sample all registered meters and append rows if dt has elapsed since last log.
+
+        A row is skipped when less than *dt* has elapsed since the last log, or when
+        *timestamp* exactly equals the last logged one.  The latter guards the engine's
+        forced final snapshot (called with ``dt=0``): it still captures the tail of a
+        recording whose length is not a whole multiple of *dt*, but no longer emits a
+        duplicate row when the final block already landed on a *dt* boundary.
+        """
+        if self._last_log is not None and (
+            timestamp == self._last_log
+            or (timestamp - self._last_log).total_seconds() < dt
+        ):
             return
 
         fmt = f"{{:.{self._precision}f}}"

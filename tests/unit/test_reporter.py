@@ -117,6 +117,26 @@ class TestRecordThrottling:
         r.record(_td(2.0), dt=1.0)  # 1.0 elapsed → records
         assert len(r._broadband_rows) == 2
 
+    def test_final_snapshot_on_dt_boundary_not_duplicated(self):
+        """The engine's forced final snapshot (dt=0) at an already-logged timestamp
+        must not append a duplicate row."""
+        r = Reporter()
+        p = _plugin(1, np.array([94.0]))
+        r.add_column("LAF", p, "LAF")
+        r.record(_td(2.0), dt=1.0)         # normal dt-boundary log
+        r.record(_td(2.0), dt=0)           # forced final snapshot, same timestamp
+        assert len(r._broadband_rows) == 1
+
+    def test_final_snapshot_off_dt_boundary_recorded(self):
+        """A forced final snapshot (dt=0) at a *later* timestamp still captures the
+        tail of a recording whose length is not a whole multiple of dt."""
+        r = Reporter()
+        p = _plugin(1, np.array([94.0]))
+        r.add_column("LAF", p, "LAF")
+        r.record(_td(2.0), dt=1.0)         # last dt-boundary log
+        r.record(_td(2.4), dt=0)           # forced final snapshot, later timestamp
+        assert len(r._broadband_rows) == 2
+
 
 # ---------------------------------------------------------------------------
 # record() row content
