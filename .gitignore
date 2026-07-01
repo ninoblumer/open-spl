@@ -10,3 +10,4 @@ build/
 todo.md
 thesis_figures/**
 data/**/comparison_summary.csv
+scripts/export_slm02_nohpf.py
