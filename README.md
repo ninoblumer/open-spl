@@ -58,6 +58,14 @@ per-`dt` results to arrive at wall-clock intervals rather than all at once:
 python -m slm --file recording.wav --fs-db 128.1 --realtime --measure LAeq LAF --dt 1.0
 ```
 
+Use `--blocksize SAMPLES` to set the processing block size (default 1024). The block duration
+(`blocksize / samplerate`) is the quantum at which log rows are written, so `--dt` is rounded
+up to the next block edge:
+
+```bash
+python -m slm --file recording.wav --fs-db 128.1 --blocksize 4800 --measure LAeq --dt 1.0
+```
+
 **Sensitivity flags** (mutually exclusive):
 
 | Flag | Argument | Use when… |

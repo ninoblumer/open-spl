@@ -54,6 +54,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Sample rate for real-time input (default: 48000)",
     )
     parser.add_argument(
+        "--blocksize", type=int, default=Controller.DEFAULT_BLOCKSIZE, metavar="SAMPLES",
+        help=f"Processing block size in samples (default: {Controller.DEFAULT_BLOCKSIZE})",
+    )
+    parser.add_argument(
         "--interactive", "-i", action="store_true",
         help="Start the interactive REPL (default when no action flags are given)",
     )
@@ -156,6 +160,9 @@ def main() -> None:
 
     if args.warmup is not None and args.warmup < 0:
         parser.error("--warmup must be non-negative")
+
+    if args.blocksize < 1:
+        parser.error("--blocksize must be a positive integer")
 
     # ------------------------------------------------------------------ #
     # Interactive REPL                                                     #
@@ -303,12 +310,14 @@ def main() -> None:
 
     if args.file:
         run_measurement(args.file, sens, config, print_to_console=True,
+                        blocksize=args.blocksize,
                         realtime=args.realtime, duration=duration)
     elif args.generator:
         from slm.app.cli import run_noise_measurement
         run_noise_measurement(
             sens, config,
             samplerate=args.samplerate,
+            blocksize=args.blocksize,
             print_to_console=True,
             duration=duration,
         )
@@ -318,6 +327,7 @@ def main() -> None:
             sens, config,
             device=args.device,
             samplerate=args.samplerate,
+            blocksize=args.blocksize,
             print_to_console=True,
             duration=duration,
         )

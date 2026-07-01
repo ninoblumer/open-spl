@@ -272,6 +272,30 @@ class TestCLIArgParsing:
         with patch.object(sys, "argv", argv), pytest.raises(SystemExit):
             main()
 
+    def test_blocksize_default(self):
+        from slm.app.__main__ import _build_parser
+        from slm.io.controller import Controller
+        parser = _build_parser()
+        args = parser.parse_args(["--file", "f.wav", "--measure", "LAeq"])
+        assert args.blocksize == Controller.DEFAULT_BLOCKSIZE
+
+    def test_blocksize_flag_parses(self):
+        from slm.app.__main__ import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["--file", "f.wav", "--measure", "LAeq", "--blocksize", "4800"]
+        )
+        assert args.blocksize == 4800
+
+    def test_nonpositive_blocksize_rejected(self):
+        from slm.app.__main__ import main
+        import sys
+        # Parsing succeeds; main() rejects via parser.error -> SystemExit
+        argv = ["slm", "--generator", "--measure", "LAeq", "--sensitivity-mv", "50",
+                "--blocksize", "0"]
+        with patch.object(sys, "argv", argv), pytest.raises(SystemExit):
+            main()
+
     def test_output_default(self):
         from slm.app.__main__ import _build_parser
         parser = _build_parser()
