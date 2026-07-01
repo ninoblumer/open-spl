@@ -1008,9 +1008,9 @@ class TestCLIArgParsingSamplerate:
         return _build_parser()
 
     def test_samplerate_default(self):
-        from slm.io.controller import Controller
+        from slm.io.realtime_controller import DEFAULT_SAMPLERATE
         args = self._parser().parse_args(["--file", "f.wav", "--measure", "LAeq"])
-        assert args.samplerate == Controller.DEFAULT_SAMPLERATE
+        assert args.samplerate == DEFAULT_SAMPLERATE
 
     def test_samplerate_flag_parses(self):
         args = self._parser().parse_args(
@@ -1026,9 +1026,9 @@ class TestCLIArgParsingSamplerate:
 class TestSLMShellSamplerate:
 
     def test_default_matches_controller(self):
-        from slm.io.controller import Controller
+        from slm.io.realtime_controller import DEFAULT_SAMPLERATE
         shell = SLMShell()
-        assert shell._samplerate == Controller.DEFAULT_SAMPLERATE
+        assert shell._samplerate == DEFAULT_SAMPLERATE
 
     def test_no_arg_shows_current(self, capsys):
         shell = SLMShell()
@@ -1057,9 +1057,9 @@ class TestSLMShellSamplerate:
 class TestSLMShellBlocksize:
 
     def test_default_matches_controller(self):
-        from slm.io.controller import Controller
+        from slm.io.realtime_controller import DEFAULT_BLOCKSIZE
         shell = SLMShell()
-        assert shell._blocksize == Controller.DEFAULT_BLOCKSIZE
+        assert shell._blocksize == DEFAULT_BLOCKSIZE
 
     def test_no_arg_shows_current(self, capsys):
         shell = SLMShell()

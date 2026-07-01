@@ -351,8 +351,8 @@ class SLMShell(cmd.Cmd):
         self._realtime: bool = False
         self._device: int | str | None = None
         self._generator_mode: bool = False
-        self._samplerate: int = Controller.DEFAULT_SAMPLERATE
-        self._blocksize: int = Controller.DEFAULT_BLOCKSIZE
+        self._samplerate: int = DEFAULT_SAMPLERATE
+        self._blocksize: int = DEFAULT_BLOCKSIZE
 
     def emptyline(self) -> bool:
         """Do nothing on an empty line.
