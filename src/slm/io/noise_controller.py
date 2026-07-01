@@ -8,8 +8,12 @@ import warnings
 
 import numpy as np
 
-from slm.io.controller import Controller
-from slm.io.realtime_controller import RealtimeController
+from slm.io.realtime_controller import (
+    DEFAULT_BLOCKSIZE,
+    DEFAULT_QUEUE_MAXSIZE,
+    DEFAULT_SAMPLERATE,
+    RealtimeController,
+)
 
 
 class NoiseController(RealtimeController):
@@ -40,18 +44,18 @@ class NoiseController(RealtimeController):
         Enable real-time pacing (default ``True``).
     queue_maxsize:
         Queue depth before excess blocks are dropped in realtime mode
-        (default 64).
+        (default 0 = unbounded).
     seed:
         Optional random seed for reproducibility.
     """
 
     def __init__(
         self,
-        samplerate: int = Controller.DEFAULT_SAMPLERATE,
-        blocksize: int = Controller.DEFAULT_BLOCKSIZE,
+        samplerate: int = DEFAULT_SAMPLERATE,
+        blocksize: int = DEFAULT_BLOCKSIZE,
         channels: int = 1,
         realtime: bool = True,
-        queue_maxsize: int = RealtimeController.DEFAULT_QUEUE_MAXSIZE,
+        queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
         seed: int | None = None,
         n_blocks: int | None = None,
         **kwargs,

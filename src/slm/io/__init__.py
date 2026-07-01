@@ -1,7 +1,12 @@
 """Public API for slm.io — I/O controllers, reporter, and display helpers."""
 from slm.io.controller import Controller
 from slm.io.file_controller import FileController
-from slm.io.realtime_controller import RealtimeController
+from slm.io.realtime_controller import (
+    DEFAULT_BLOCKSIZE,
+    DEFAULT_QUEUE_MAXSIZE,
+    DEFAULT_SAMPLERATE,
+    RealtimeController,
+)
 from slm.io.noise_controller import NoiseController
 from slm.io.reporter import Reporter
 from slm.io.display import make_display_fn
@@ -13,6 +18,9 @@ except ImportError: # pragma: no cover
     _has_sounddevice = False
 
 __all__ = [
+    "DEFAULT_SAMPLERATE",
+    "DEFAULT_BLOCKSIZE",
+    "DEFAULT_QUEUE_MAXSIZE",
     "Controller",
     "FileController",
     "RealtimeController",

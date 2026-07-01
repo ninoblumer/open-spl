@@ -24,8 +24,11 @@ from __future__ import annotations
 import argparse
 
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB
-from slm.io.controller import Controller
-from slm.io.realtime_controller import RealtimeController
+from slm.io.realtime_controller import (
+    DEFAULT_BLOCKSIZE,
+    DEFAULT_QUEUE_MAXSIZE,
+    DEFAULT_SAMPLERATE,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -50,12 +53,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List available audio input devices and exit",
     )
     parser.add_argument(
-        "--samplerate", type=int, default=Controller.DEFAULT_SAMPLERATE, metavar="HZ",
-        help="Sample rate for real-time input (default: 48000)",
+        "--samplerate", type=int, default=DEFAULT_SAMPLERATE, metavar="HZ",
+        help=f"Sample rate for real-time input (default: {DEFAULT_SAMPLERATE})",
     )
     parser.add_argument(
-        "--blocksize", type=int, default=Controller.DEFAULT_BLOCKSIZE, metavar="SAMPLES",
-        help=f"Processing block size in samples (default: {Controller.DEFAULT_BLOCKSIZE})",
+        "--blocksize", type=int, default=DEFAULT_BLOCKSIZE, metavar="SAMPLES",
+        help=f"Processing block size in samples (default: {DEFAULT_BLOCKSIZE})",
     )
     parser.add_argument(
         "--interactive", "-i", action="store_true",
@@ -108,7 +111,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--queue-maxsize", type=int, default=None, metavar="N",
-        help="Real-time block queue depth (default: 4). Larger values absorb scheduling jitter.",
+        help="Real-time block queue depth (default: 0 = unbounded). Larger finite "
+             "values bound latency but drop blocks if the engine falls behind.",
     )
 
     sens_group = parser.add_mutually_exclusive_group()
@@ -212,7 +216,7 @@ def main() -> None:
                 metrics=list(args.measure) if args.measure else [],
                 dt=args.dt if args.dt is not None else 1.0,
                 output=args.output if args.output is not None else "output/measurement",
-                queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else RealtimeController.DEFAULT_QUEUE_MAXSIZE,
+                queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else DEFAULT_QUEUE_MAXSIZE,
                 warmup=args.warmup if args.warmup is not None else 0.0,
             )
 
@@ -286,7 +290,7 @@ def main() -> None:
             metrics=list(args.measure),
             dt=args.dt if args.dt is not None else 1.0,
             output=args.output if args.output is not None else "output/measurement",
-            queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else RealtimeController.DEFAULT_QUEUE_MAXSIZE,
+            queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else DEFAULT_QUEUE_MAXSIZE,
             warmup=args.warmup if args.warmup is not None else 0.0,
         )
 
