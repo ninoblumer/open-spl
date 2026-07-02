@@ -10,6 +10,9 @@ import matplotlib.ticker as ticker
 import matplotlib.patches as mpatches
 from pathlib import Path
 
+from scipy import signal as sig
+from pyoctaveband import WeightingFilter
+
 # ── global style ─────────────────────────────────────────────────────────────
 plt.rcParams.update({
     "font.family":        "serif",
@@ -159,6 +162,61 @@ def make_fig_t1():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# FIG T.2 — Frequency-weighting gain and group delay (A and C)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Digital weighting filters are designed at this sample rate (bilinear transform),
+# so the phase / group delay are those of the actual IIR implementation.
+_WEIGHTING_FS = 48000
+
+
+def make_fig_t2():
+    """Gain and group delay of the A- and C-weighting filters.
+
+    Top panel: magnitude response (dB). Bottom panel: group delay (ms), computed
+    as -dφ/dω from the unwrapped phase. Both weightings are the digital SOS filters
+    used by the SLM (``pyoctaveband.WeightingFilter`` at fs = 48 kHz), so the
+    group delay is that of the causal IIR implementation — large near the
+    low-frequency high-pass corner, essentially flat above a few hundred Hz.
+    """
+    fs = _WEIGHTING_FS
+    f = np.logspace(np.log10(10), np.log10(20000), 4000)
+    w = 2.0 * np.pi * f / fs                       # rad/sample
+
+    curves = {
+        "A": (C_BLUE, WeightingFilter(fs=fs, curve="A").sos),
+        "C": (C_RED,  WeightingFilter(fs=fs, curve="C").sos),
+    }
+
+    fig, (ax_gain, ax_gd) = plt.subplots(2, 1, figsize=(9, 7.5), sharex=True)
+
+    for name, (color, sos) in curves.items():
+        _, h = sig.sosfreqz(sos, worN=f, fs=fs)
+        gain = 20.0 * np.log10(np.abs(h) + 1e-30)
+        phase = np.unwrap(np.angle(h))
+        gd_ms = -np.gradient(phase, w) / fs * 1e3
+        ax_gain.semilogx(f, gain, color=color, label=f"{name}-weighting")
+        ax_gd.semilogx(f, gd_ms, color=color, label=f"{name}-weighting")
+
+    ax_gain.axhline(0.0, color="black", lw=0.6)
+    ax_gain.set_ylabel("Gain (dB)")
+    ax_gain.set_ylim(-60, 5)
+    ax_gain.set_title("Frequency-weighting gain", fontsize=9)
+    ax_gain.legend(loc="lower center", fontsize=8)
+
+    ax_gd.axhline(0.0, color="black", lw=0.6)
+    ax_gd.set_ylabel("Group delay (ms)")
+    ax_gd.set_xlabel("Frequency (Hz)")
+    ax_gd.set_xlim(10, 20000)
+    ax_gd.set_title("Frequency-weighting group delay", fontsize=9)
+    ax_gd.legend(loc="upper right", fontsize=8)
+
+    fig.suptitle(f"A- and C-weighting filters (fs = {fs // 1000} kHz)",
+                 fontsize=10)
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -166,6 +224,7 @@ if __name__ == "__main__":
     print("Generating theory figures…")
     figures = [
         (make_fig_t1, "fig_t1_toneburst_shapes"),
+        (make_fig_t2, "fig_t2_weighting_gain_groupdelay"),
     ]
     for fn, name in figures:
         print(f"\n[{name}]")
