@@ -1,0 +1,3 @@
+# NTi XL2 device-settings/project files — not used by the SLM pipeline or tests.
+*.XL2
+*.xl2
