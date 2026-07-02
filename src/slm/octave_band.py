@@ -67,7 +67,7 @@ class PluginOctaveBand(PluginMeter):
 
 #  Excluded from test coverage: Numba compiles this to machine code, so coverage.py cannot trace its body.
 #  It is verified functionally, both against the IEC 61260-1:2014 class-1 filter conformance limits
-#  (tests/iec61260/) and against NTi XL2 hardware RTA reference (tests/xl2/test_xl2_rta.py).
+#  (tests/iec61260/) and against a hardware RTA reference (integration tests).
 @njit(parallel=True, cache=True)
 def _sosfilt_all_bands(  # pragma: no cover
     sos_stack: np.ndarray,

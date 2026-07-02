@@ -4,25 +4,30 @@ Companion to ``thesis_plots_conformance.py`` (same visual style), but instead of
 the IEC reference-signal conformance tests this visualises the field validation
 against the NTi XL2 on the *slm-test-02* recordings.
 
-The numbers come straight from ``scripts/compare_xl2_slm02.py`` so the figures and
-the textual comparison report can never drift apart: the calibration pinning
-(SLM_000, 94 dB @ 1 kHz), the 2 s filter warm-up, and the flat Z weighting (no
-XL2 modelling) are all inherited from that module.
+The SLM-vs-XL2 computation machinery (calibration pinning on SLM_000, 94 dB @
+1 kHz; the 2 s filter warm-up; the per-metric ``compute_*`` passes) is inlined
+below — this script is self-contained. The XL2 input filter on the broadband
+chains is toggled by the ``USE_XL2_INPUT_FILTER`` switch below (the RTA /
+octave-band spectra are always flat Z, unaffected by the switch).
 
 Four figures are produced:
 
   fig_s1_broadband   — broadband metric differences (measured - reference), one panel per
                        weighting (A/C/Z), markers per recording.
-  fig_s2_interval_*  — per-second difference (measured - reference) vs time, 2x2 recording
-                       grid, A/C/Z overlaid. One figure per metric: Leq at 1 s,
-                       5", 10", 15", then LFmax_dt, LSmax_dt, LFmin_dt, LSmin_dt,
+  fig_s2_interval_*  — per-second difference (measured - reference) vs time, one
+                       panel per recording, A/C/Z overlaid. One figure per metric:
+                       Leq at 1 s, 5", 10", 15", then LFmax_dt, LSmax_dt,
                        Lpeak_dt. The XL2 logs no Z for the 5"/10"/15" windows, so
                        those three show A and C only.
-  fig_s3_rta_spectra — whole-file 1/3-octave L_Zeq spectra, SLM vs XL2, 2x2 grid.
+  fig_s3_rta_spectra — whole-file 1/3-octave L_Zeq spectra, SLM vs XL2, one panel
+                       per recording.
   fig_s4_rta_dev     — 1/3-octave L_Zeq deviation vs band, all recordings.
 
+The 94 dB / 1 kHz calibrator recording (SLM_000 / M00) still pins sensitivity but
+is not plotted; only the four field recordings are shown.
+
 Run from repository root:
-    venv/Scripts/python scripts/thesis_plots_slm02.py
+    venv/Scripts/python scripts/thesis_plots_validation.py
 """
 from __future__ import annotations
 
@@ -54,16 +59,339 @@ C_BLUE   = "#2166ac"
 C_RED    = "#d6604d"
 C_ORANGE = "#e6821e"
 C_GREEN  = "#4dac26"
+C_PURPLE = "#762a83"
 C_GREY   = "#555555"
 
-# ── comparison machinery (single source of truth for the numbers) ─────────────
-from scripts.compare_xl2_slm02 import (
-    DATA_DIR, WEIGHTINGS,
-    discover, calibrate, display_label,
-    compute_broadband, compute_interval_metrics, compute_moving_leq,
-    compute_octave_lzeq,
-    xl2_report_scalar, xl2_log_series, xl2_rta_lzeq,
+# ── comparison machinery (inlined; formerly scripts/compare_xl2_slm02.py) ─────
+# Self-contained SLM-vs-XL2 computation for the slm-test-02 set. The broadband
+# metering chains carry the XL2 analog input filter (PluginXL2InputFilter) when
+# USE_XL2_INPUT_FILTER is True (set in the switch section below); the RTA /
+# octave-band path is always flat Z.
+import re
+from dataclasses import dataclass
+
+from slm.constants import REFERENCE_PRESSURE
+from slm.engine import Engine
+from slm.frequency_weighting import (
+    PluginAWeighting, PluginCWeighting, PluginZWeighting, PluginXL2InputFilter,
 )
+from slm.io.file_controller import FileController
+from slm.meter import (
+    LeqAccumulator, MaxAccumulator, MinAccumulator, LEAccumulator, LeqMovingMeter,
+)
+from slm.octave_band import PluginOctaveBand
+from slm.time_weighting import (
+    PluginFastTimeWeighting, PluginSlowTimeWeighting, PluginImpulseTimeWeighting,
+    PluginSquare,
+)
+from util.xl2 import XL2_SLM_File
+
+DATA_DIR = Path("data/slm-test-02")
+WAV_SKIP_SAMPLES = 0
+WEIGHTINGS = (("A", PluginAWeighting), ("C", PluginCWeighting), ("Z", PluginZWeighting))
+_TW_CLS = {
+    "F": PluginFastTimeWeighting,
+    "S": PluginSlowTimeWeighting,
+    "I": PluginImpulseTimeWeighting,
+}
+
+
+def parse_fs_db(wav_path: Path) -> float:
+    """Full-scale peak level (dB) from an XL2 WAV filename: '..._FS129.1dB(PK)_..'."""
+    m = re.search(r"FS([\d.]+)dB\(PK\)", wav_path.name)
+    if not m:
+        raise ValueError(f"No FS annotation in {wav_path.name}")
+    return float(m.group(1))
+
+
+def sensitivity_from_fs(fs_db: float) -> float:
+    """Controller sensitivity (V/Pa) implied by the nominal full-scale annotation."""
+    return 1.0 / (10 ** (fs_db / 20) * REFERENCE_PRESSURE)
+
+
+def display_label(name: str) -> str:
+    """Short human-facing recording label: 'SLM_002' or '..._SLM_002' -> 'M02'."""
+    m = re.search(r"SLM_0*(\d+)", name)
+    return f"M{int(m.group(1)):02d}" if m else name
+
+
+@dataclass
+class Recording:
+    """One XL2 dataset: the WAV plus its parsed reference files."""
+
+    name: str            # e.g. '2026-06-29_SLM_002'
+    label: str           # human description
+    wav: Path
+    fs_db: float
+    sensitivity: float = 0.0
+    report: XL2_SLM_File | None = None
+    log: XL2_SLM_File | None = None
+    rta_report: XL2_SLM_File | None = None
+
+    @property
+    def samplerate(self) -> int:
+        import soundfile as sf
+        return sf.info(str(self.wav)).samplerate
+
+
+def discover(data_dir: Path) -> dict[str, Recording]:
+    """Find every SLM_NNN recording in *data_dir* and parse its reference files."""
+    labels = {
+        "SLM_000": "94 dB / 1 kHz calibration tone",
+        "SLM_001": "Pink noise",
+        "SLM_002": "Background noise",
+        "SLM_003": "Tapping machine",
+        "SLM_004": "Manual hammering",
+    }
+    recordings: dict[str, Recording] = {}
+    for wav in sorted(data_dir.glob("*_Audio_*.wav")):
+        m = re.search(r"(\d{4}-\d{2}-\d{2}_SLM_\d{3})", wav.name)
+        if not m:
+            continue
+        name = m.group(1)
+        key = name.split("_", 1)[1]  # 'SLM_002'
+
+        def first(pattern: str) -> XL2_SLM_File | None:
+            hits = list(data_dir.glob(pattern))
+            return XL2_SLM_File(hits[0]) if hits else None
+
+        recordings[key] = Recording(
+            name=name,
+            label=labels.get(key, "?"),
+            wav=wav,
+            fs_db=parse_fs_db(wav),
+            report=first(f"{name}_123_Report.txt"),
+            log=first(f"{name}_123_Log.txt"),
+            rta_report=first(f"{name}_RTA_*_Report.txt"),
+        )
+    return recordings
+
+
+def calibrate(recordings: dict[str, Recording]) -> None:
+    """Set every recording's sensitivity from its own FS annotation."""
+    print("Calibration (FS annotation)")
+    for rec in recordings.values():
+        rec.sensitivity = sensitivity_from_fs(rec.fs_db)
+        print(f"  {display_label(rec.name)}: FS{rec.fs_db} -> {rec.sensitivity:.6g} V/Pa")
+    print()
+
+
+def _controller(rec: Recording, blocksize: int) -> FileController:
+    c = FileController(str(rec.wav), blocksize=blocksize)
+    c.set_sensitivity(rec.sensitivity, unit="V")
+    if WAV_SKIP_SAMPLES:
+        c._sf.seek(WAV_SKIP_SAMPLES)
+        c._stream = c._sf.blocks(blocksize=blocksize, overlap=0,
+                                 fill_value=0.0, always_2d=True)
+    return c
+
+
+def _metering_source(bus):
+    """Frequency-weighting output, with the XL2 input filter inserted if enabled.
+
+    Used by the broadband metering chains (report, per-second log, moving Leq) so
+    the XL2's band-limiting input filter (4.4 Hz HPF + 23 kHz LPF, both 4th-order
+    Butterworth) is applied there — unless ``USE_XL2_INPUT_FILTER`` is False, in
+    which case the flat frequency-weighting output is metered directly. The RTA /
+    octave path always bypasses this and reads ``bus.frequency_weighting``.
+    """
+    if not USE_XL2_INPUT_FILTER:
+        return bus.frequency_weighting
+    return bus.add_plugin(PluginXL2InputFilter(
+        input=bus.frequency_weighting, zero_zi=True,
+    ))
+
+
+def compute_broadband(rec: Recording, blocksize: int = 1024,
+                      warmup_s: float = 2.0) -> dict[str, float]:
+    """All broadband scalar metrics in a single pass: eq / S,F,I max,min / E / peak.
+
+    The time-weighting filters start from zero, so their first samples are a
+    settling transient. We let *warmup_s* seconds of signal settle the filters,
+    then reset the time-weighted max/min meters (and the peak, which the input
+    filter's cold-start ring would overshoot). ``eq``/``E`` accumulate over the
+    whole file and are unaffected.
+    """
+    controller = _controller(rec, blocksize)
+    engine = Engine(controller, dt=1e9)            # never logs; we read at the end
+
+    results: dict[str, float] = {}
+    reads: list[tuple[str, object, str]] = []      # (metric, plugin, meter_name)
+    warmup_meters: list[object] = []               # reset after warm-up
+
+    for w, w_cls in WEIGHTINGS:
+        bus = engine.add_bus(w, w_cls)
+        fw = _metering_source(bus)
+
+        # eq / SEL / peak from the squared (Pa²) pressure.
+        sq = bus.add_plugin(PluginSquare(input=fw, zero_zi=True))
+        sq.create_meter(LeqAccumulator, name="eq")
+        sq.create_meter(LEAccumulator, name="E")
+        sq.create_meter(MaxAccumulator, name="peak")
+        warmup_meters.append(sq.meters["peak"])   # filter startup overshoots the peak
+        reads += [(f"L{w}eq", sq, "eq"), (f"L{w}E", sq, "E"), (f"L{w}PKmax", sq, "peak")]
+
+        # max / min for each time weighting (S/F/I).
+        for tw in ("S", "F", "I"):
+            twp = bus.add_plugin(_TW_CLS[tw](input=fw, zero_zi=True))
+            twp.create_meter(MaxAccumulator, name="max")
+            twp.create_meter(MinAccumulator, name="min")
+            warmup_meters += [twp.meters["max"], twp.meters["min"]]
+            reads += [(f"L{w}{tw}max", twp, "max"), (f"L{w}{tw}min", twp, "min")]
+
+    busses = list(engine._busses.values())
+    warmup_samples = int(round(warmup_s * controller.samplerate))
+    warmed = False
+    n = 0
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        for bus in busses:
+            bus.process(block.T)
+        n += block.shape[0]
+        if not warmed and n >= warmup_samples:
+            for m in warmup_meters:
+                m.reset()
+            warmed = True
+
+    for metric, plugin, meter in reads:
+        results[metric] = float(plugin.read_db(meter)[0])
+    return results
+
+
+def compute_interval_metrics(rec: Recording, w_cls, dt: float = 1.0,
+                             blocksize: int = 4800) -> dict[str, np.ndarray]:
+    """Per-interval metric series for one weighting, all in a single pass.
+
+    Returns a dict of equal-length arrays (one value per *dt* interval):
+    ``eq`` (LWeq_dt), ``peak`` (LWPKmax_dt), ``Fmax``/``Fmin`` (LWF max/min_dt),
+    ``Smax``/``Smin`` (LWS max/min_dt). Only the meter accumulators reset at each
+    interval boundary; the time-weighting filter stays warm across intervals, so
+    the first interval is a cold-start transient callers should discard.
+    """
+    controller = _controller(rec, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", w_cls)
+    fw = _metering_source(bus)
+
+    sq = bus.add_plugin(PluginSquare(input=fw, zero_zi=True))
+    sq.create_meter(LeqAccumulator, name="eq")
+    sq.create_meter(MaxAccumulator, name="peak")
+    fast = bus.add_plugin(PluginFastTimeWeighting(input=fw, zero_zi=True))
+    fast.create_meter(MaxAccumulator, name="max")
+    fast.create_meter(MinAccumulator, name="min")
+    slow = bus.add_plugin(PluginSlowTimeWeighting(input=fw, zero_zi=True))
+    slow.create_meter(MaxAccumulator, name="max")
+    slow.create_meter(MinAccumulator, name="min")
+
+    reads = [("eq", sq, "eq"), ("peak", sq, "peak"),
+             ("Fmax", fast, "max"), ("Fmin", fast, "min"),
+             ("Smax", slow, "max"), ("Smin", slow, "min")]
+    meters = [sq.meters["eq"], sq.meters["peak"], fast.meters["max"],
+              fast.meters["min"], slow.meters["max"], slow.meters["min"]]
+
+    interval = int(round(dt * controller.samplerate))
+    out: dict[str, list[float]] = {name: [] for name, _, _ in reads}
+    n_acc = 0
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+        n_acc += blocksize
+        if n_acc >= interval:
+            for name, plugin, meter in reads:
+                out[name].append(float(plugin.read_db(meter)[0]))
+            for m in meters:
+                m.reset()
+            n_acc -= interval
+    return {name: np.array(vals) for name, vals in out.items()}
+
+
+def compute_moving_leq(rec: Recording, w_cls, windows=(5, 10, 15),
+                       dt: float = 1.0, blocksize: int = 4800) -> dict[int, np.ndarray]:
+    """Per-second trailing moving Leq for each window length, via the SLM's own
+    moving-Leq meters (``LeqMovingMeter``). Each series is NaN for the first
+    *window* seconds and the full-window trailing Leq thereafter."""
+    controller = _controller(rec, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", w_cls)
+    sq = bus.add_plugin(PluginSquare(input=_metering_source(bus), zero_zi=True))
+    for w in windows:
+        sq.create_meter(LeqMovingMeter, name=f"m{w}", t=float(w))
+
+    interval = int(round(dt * controller.samplerate))
+    out: dict[int, list[float]] = {w: [] for w in windows}
+    n_acc = 0
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+        n_acc += blocksize
+        if n_acc >= interval:
+            for w in windows:
+                out[w].append(float(sq.read_db(f"m{w}")[0]))
+            n_acc -= interval
+    return {w: np.array(vals) for w, vals in out.items()}
+
+
+def compute_octave_lzeq(rec: Recording, blocksize: int = 1024) -> tuple[np.ndarray, list[str]]:
+    """Whole-file 1/3-octave LZeq spectrum (flat Z), 6.3 Hz – 20 kHz (36 bands)."""
+    controller = _controller(rec, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("Z", PluginZWeighting)
+    # No XL2 input filter here: the RTA band edges (6.3 Hz–20 kHz) already sit
+    # inside the filter passband (4.4 Hz–23 kHz).
+    octave = bus.add_plugin(PluginOctaveBand(
+        limits=(6.3, 20000), bands_per_oct=3.0,
+        input=bus.frequency_weighting, zero_zi=True,
+    ))
+    sum_sq = np.zeros(octave.n_bands, dtype=np.float64)
+    n = 0
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+        sum_sq += np.sum(octave.output ** 2, axis=1)
+        n += block.shape[0]
+    p_ref_sq = (REFERENCE_PRESSURE * rec.sensitivity) ** 2
+    leq = 10 * np.log10(sum_sq / n / p_ref_sq)
+    return leq, octave.center_frequencies
+
+
+def xl2_report_scalar(rec: Recording, col: str) -> float | None:
+    df = rec.report.sections["Broadband Results"].df
+    if col not in df.columns:
+        return None
+    val = df[col].iloc[0]
+    return None if val is None else float(val)
+
+
+def xl2_log_series(rec: Recording, col: str) -> np.ndarray | None:
+    df = rec.log.sections["Broadband LOG Results"].df
+    if col not in df.columns:
+        return None
+    return df[col].astype(float).values
+
+
+def xl2_rta_lzeq(rec: Recording) -> np.ndarray:
+    df = rec.rta_report.sections["RTA Results"].df
+    return df.loc["LZeq"].astype(float).values
+
+# ── XL2 input-filter switch ───────────────────────────────────────────────────
+# When True, the XL2 analog input filter (4.4 Hz HPF + 23 kHz LPF, both 4th-order
+# Butterworth) is applied to the BROADBAND metering chains (figs s1, s2),
+# reproducing the XL2's broadband roll-off. Set False to meter flat A/C/Z with no
+# input filter. The RTA / octave-band spectra (figs s3, s4) are always flat Z and
+# are unaffected by this switch.
+USE_XL2_INPUT_FILTER = True
 
 # ── output ────────────────────────────────────────────────────────────────────
 OUT = Path("thesis_figures")
@@ -77,7 +405,8 @@ def save(fig, name: str) -> None:
 
 
 # ── recording presentation order, colours and markers ─────────────────────────
-# SLM_000 is the calibrator tone (used only to pin sensitivity); not plotted.
+# SLM_000 (the 94 dB / 1 kHz calibrator tone) still pins sensitivity via
+# calibrate(), but is not plotted — only the field recordings are shown.
 PLOT_KEYS = ["SLM_001", "SLM_002", "SLM_003", "SLM_004"]
 REC_COLOR  = {"SLM_001": C_BLUE, "SLM_002": C_ORANGE,
               "SLM_003": C_RED,  "SLM_004": C_GREEN}
@@ -104,6 +433,13 @@ def _octave(rec):
     return _octave_cache[rec.name]
 
 
+def _grid_shape(n: int, ncol: int = 3) -> tuple[int, int]:
+    """(rows, cols) for an *n*-panel recording grid, at most *ncol* wide."""
+    ncol = min(ncol, n)
+    nrow = int(np.ceil(n / ncol))
+    return nrow, ncol
+
+
 def _fmt_hz(f: float) -> str:
     """'63.0' -> '63', '1000.0' -> '1k', '12500.0' -> '12.5k'."""
     if f >= 1000:
@@ -118,11 +454,10 @@ def _fmt_hz(f: float) -> str:
 
 # Metric "base" names (weighting letter stripped) in display order.
 # Impulse (I) time weighting is intentionally excluded.
-_BASES = ["eq", "E", "PKmax", "Smax", "Smin", "Fmax", "Fmin"]
+_BASES = ["eq", "E", "PKmax", "Smax", "Fmax"]
 _BASE_LABEL = {
     "eq": r"$L_{eq}$", "E": "$L_E$", "PKmax": "$L_{peak}$",
-    "Smax": r"$L_{S,max}$", "Smin": r"$L_{S,min}$",
-    "Fmax": r"$L_{F,max}$", "Fmin": r"$L_{F,min}$",
+    "Smax": r"$L_{S,max}$", "Fmax": r"$L_{F,max}$",
 }
 
 
@@ -224,16 +559,18 @@ def _moving_metrics(rec, w: str, w_cls) -> dict[int, np.ndarray]:
 
 def _interval_diff_figure(recordings, *, slm_fn, xl2_col, title,
                           mask: int = 0, ylim=(-0.6, 0.6)) -> plt.Figure:
-    """Per-second difference (measured - reference) vs time, 2x2 recording grid, A/C/Z overlaid.
+    """Per-second difference (measured - reference) vs time, one panel per recording, A/C/Z overlaid.
 
     *slm_fn(rec, w, w_cls)* returns the SLM series for one weighting; *xl2_col*
     maps a weighting letter to the matching XL2 log column. The first *mask*
     intervals are blanked (filter cold-start for the time-weighted detectors).
     """
-    fig, axes = plt.subplots(2, 2, figsize=(11, 6.5),
+    nrow, ncol = _grid_shape(len(PLOT_KEYS), ncol=2)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5.5 * ncol, 3.25 * nrow),
                              gridspec_kw={"hspace": 0.32, "wspace": 0.18})
+    axes_flat = np.asarray(axes).flatten()
 
-    for ax, key in zip(axes.flat, PLOT_KEYS):
+    for ax, key in zip(axes_flat, PLOT_KEYS):
         rec = recordings[key]
         for w, w_cls in WEIGHTINGS:
             try:
@@ -259,6 +596,9 @@ def _interval_diff_figure(recordings, *, slm_fn, xl2_col, title,
         ax.set_ylabel(r"$\Delta$ (dB)", fontsize=8)
         if key == PLOT_KEYS[0] and ax.get_legend_handles_labels()[0]:
             ax.legend(fontsize=7, loc="best", title="weighting", ncol=3)
+
+    for ax in axes_flat[len(PLOT_KEYS):]:
+        ax.set_visible(False)
 
     fig.suptitle(title, fontsize=11)
     return fig
@@ -293,17 +633,13 @@ def _leq_col(secs: int):
 
 # Per-second (dt) metrics other than Leq. F/S detectors start cold; the Slow
 # detector (tau = 1 s) needs ~5 s to settle, so the first 5 intervals of the
-# time-weighted max/min are masked.
+# time-weighted max are masked.
 # (filename suffix, metric key, XL2 column fn, title, mask, ylim)
 _INTERVAL_SPECS = [
     ("lfmax_dt", "Fmax", lambda w: f"L{w}Fmax_dt",
      r"Per-second $L_{F,max,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
     ("lsmax_dt", "Smax", lambda w: f"L{w}Smax_dt",
      r"Per-second $L_{S,max,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
-    ("lfmin_dt", "Fmin", lambda w: f"L{w}Fmin_dt",
-     r"Per-second $L_{F,min,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
-    ("lsmin_dt", "Smin", lambda w: f"L{w}Smin_dt",
-     r"Per-second $L_{S,min,dt}$ Difference (measured - reference)", 5, (-1.5, 1.5)),
     ("lpeak_dt", "peak", lambda w: f"L{w}PKmax_dt",
      r"Per-second $L_{peak,dt}$ Difference (measured - reference)", 0, (-1.5, 1.5)),
 ]
@@ -330,11 +666,16 @@ def _interval_figures():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def make_fig_s3(recordings) -> plt.Figure:
-    """Whole-file 1/3-octave L_Zeq spectra, SLM vs XL2, 2x2 grid."""
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7),
+    """Whole-file 1/3-octave L_Zeq spectra, SLM vs XL2, recording grid."""
+    nrow, ncol = _grid_shape(len(PLOT_KEYS), ncol=2)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5.5 * ncol, 3.5 * nrow),
                              gridspec_kw={"hspace": 0.48, "wspace": 0.18})
+    axes_flat = np.asarray(axes).flatten()
 
-    for ax, key in zip(axes.flat, PLOT_KEYS):
+    for ax in axes_flat[len(PLOT_KEYS):]:
+        ax.set_visible(False)
+
+    for ax, key in zip(axes_flat, PLOT_KEYS):
         rec = recordings[key]
         try:
             ref = xl2_rta_lzeq(rec)

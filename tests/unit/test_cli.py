@@ -107,6 +107,70 @@ class TestSLMConfigToml:
         config.to_toml(toml_path)   # should create parent dirs
         assert toml_path.exists()
 
+    def test_signal_conditioning_round_trip(self, tmp_path):
+        config = SLMConfig(metrics=["LAeq"], signal_conditioning="xl2")
+        toml_path = tmp_path / "config.toml"
+        config.to_toml(toml_path)
+        assert SLMConfig.from_toml(toml_path).signal_conditioning == "xl2"
+
+    def test_custom_signal_conditioning_round_trip(self, tmp_path):
+        config = SLMConfig(metrics=["LAeq"], signal_conditioning="4.4 4 20000.0 4")
+        toml_path = tmp_path / "config.toml"
+        config.to_toml(toml_path)
+        assert SLMConfig.from_toml(toml_path).signal_conditioning == "4.4 4 20000.0 4"
+
+    def test_custom_signal_conditioning_negative_order_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="orders must be"):
+            SLMConfig(metrics=["LAeq"]).from_args(
+                ["LAeq"], dt=1.0, output="out", signal_conditioning="20 2 23000 -1")
+
+    def test_signal_conditioning_defaults_to_none(self, tmp_path):
+        toml_path = tmp_path / "minimal.toml"
+        toml_path.write_text("[measurement]\n", encoding="utf-8")
+        assert SLMConfig.from_toml(toml_path).signal_conditioning is None
+
+    def test_signal_conditioning_none_normalizes(self, tmp_path):
+        toml_path = tmp_path / "c.toml"
+        toml_path.write_text('[measurement]\nsignal_conditioning = "none"\n', encoding="utf-8")
+        assert SLMConfig.from_toml(toml_path).signal_conditioning is None
+
+    def test_unknown_signal_conditioning_raises(self, tmp_path):
+        toml_path = tmp_path / "bad.toml"
+        toml_path.write_text('[measurement]\nsignal_conditioning = "bogus"\n', encoding="utf-8")
+        with pytest.raises(ValueError, match="signal.conditioning"):
+            SLMConfig.from_toml(toml_path)
+
+
+class TestSignalConditioning:
+
+    def test_resolve_xl2_returns_input_filter(self):
+        from slm.app.cli import resolve_signal_conditioning
+        from slm.frequency_weighting import PluginXL2InputFilter
+        assert resolve_signal_conditioning("xl2") is PluginXL2InputFilter
+
+    def test_resolve_custom_returns_configured_filter(self):
+        from slm.app.cli import resolve_signal_conditioning
+        from slm.frequency_weighting import PluginInputFilter
+        factory = resolve_signal_conditioning("4.4 0 20000 4")
+        # A functools.partial over PluginInputFilter with the parsed spec bound.
+        assert factory.func is PluginInputFilter
+        assert factory.keywords == {
+            "hpf_fc": 4.4, "hpf_order": 0, "lpf_fc": 20000.0, "lpf_order": 4}
+
+    def test_resolve_custom_negative_order_raises(self):
+        from slm.app.cli import resolve_signal_conditioning
+        with pytest.raises(ValueError, match="orders must be"):
+            resolve_signal_conditioning("20 2 23000 -2")
+
+    def test_resolve_none_returns_none(self):
+        from slm.app.cli import resolve_signal_conditioning
+        assert resolve_signal_conditioning(None) is None
+
+    def test_resolve_unknown_raises(self):
+        from slm.app.cli import resolve_signal_conditioning
+        with pytest.raises(ValueError, match="Unknown signal conditioning"):
+            resolve_signal_conditioning("bogus")
+
 
 class TestSLMConfigFromArgs:
 
@@ -820,6 +884,49 @@ class TestSLMShellWarmup:
         shell = SLMShell()
         shell.do_warmup("soon")
         assert "Invalid" in capsys.readouterr().out
+
+
+class TestSLMShellConditioning:
+
+    def test_preset_sets_value(self, capsys):
+        shell = SLMShell()
+        shell.do_conditioning("xl2")
+        assert shell._config.signal_conditioning == "xl2"
+        assert "xl2" in capsys.readouterr().out
+
+    def test_custom_spec_sets_canonical_value(self, capsys):
+        shell = SLMShell()
+        shell.do_conditioning("20 2 23000 4")
+        assert shell._config.signal_conditioning == "20.0 2 23000.0 4"
+
+    def test_none_clears_value(self, capsys):
+        shell = SLMShell()
+        shell._config.signal_conditioning = "xl2"
+        shell.do_conditioning("none")
+        assert shell._config.signal_conditioning is None
+
+    def test_no_arg_shows_current(self, capsys):
+        shell = SLMShell()
+        shell.do_conditioning("")
+        assert "Conditioning" in capsys.readouterr().out
+
+    def test_invalid_rejected_and_unchanged(self, capsys):
+        shell = SLMShell()
+        shell.do_conditioning("bogus")
+        assert "Invalid signal conditioning" in capsys.readouterr().out
+        assert shell._config.signal_conditioning is None
+
+    def test_negative_order_rejected(self, capsys):
+        shell = SLMShell()
+        shell.do_conditioning("23000 4 20 -1")
+        assert "Invalid signal conditioning" in capsys.readouterr().out
+        assert shell._config.signal_conditioning is None
+
+    def test_show_includes_conditioning(self, capsys):
+        shell = SLMShell()
+        shell._config.signal_conditioning = "xl2"
+        shell.do_show("")
+        assert "Conditioning" in capsys.readouterr().out
 
 
 class TestSLMShellStartDuration:

@@ -73,6 +73,23 @@ Use `--display bars` for a live-updating bar graph instead of the default scroll
 python -m slm --device 0 --sensitivity-mv 50 --measure LAeq:bands:63-8000 --display bars
 ```
 
+Use `--signal-conditioning SPEC` to insert a signal-conditioning filter at the head of
+every metering chain, in front of the frequency weighting. `SPEC` is either a preset name
+or a custom band-limiting spec:
+
+- `xl2` — preset band-limiting analog input filter (a 4.4 Hz Butterworth high-pass and a
+  23 kHz Butterworth low-pass), useful when comparing broadband results against an XL2.
+- `none` (the default) — leaves the chain unconditioned.
+- `F_HPF N_HPF F_LPF N_LPF` — a custom filter: high-pass cutoff (Hz) and order, then low-pass
+  cutoff (Hz) and order. An order of `0` disables that stage; negative orders are rejected.
+
+```bash
+python -m slm --file recording.wav --fs-db 128.1 --measure LZeq --signal-conditioning xl2
+
+# custom: 20 Hz 2nd-order HPF + 23 kHz 4th-order LPF
+python -m slm --file recording.wav --fs-db 128.1 --measure LZeq --signal-conditioning 20 2 23000 4
+```
+
 **Sensitivity flags** (mutually exclusive):
 
 | Flag | Argument | Use when… |
@@ -107,10 +124,16 @@ python -m slm -i --file recording.wav --fs-db 128.1 --config config.toml
 ```
 
 Key REPL commands: `file`, `device`, `generator`, `sensitivity`, `calibrate`, `add`,
-`remove`, `dt`, `output`, `name`, `warmup`, `queue`, `samplerate`, `blocksize`, `realtime`,
-`display`, `show`, `tree`, `inspect`, `save`, `load`, `start`. The `samplerate` and
-`blocksize` commands mirror the `--samplerate`/`--blocksize` CLI flags (sample rate applies
-to device/generator input only; for a WAV file it is read from the header).
+`remove`, `dt`, `output`, `name`, `warmup`, `conditioning`, `queue`, `samplerate`,
+`blocksize`, `realtime`, `display`, `show`, `tree`, `inspect`, `save`, `load`, `start`. The
+`samplerate` and `blocksize` commands mirror the `--samplerate`/`--blocksize` CLI flags
+(sample rate applies to device/generator input only; for a WAV file it is read from the
+header).
+
+`conditioning SPEC` mirrors the `--signal-conditioning` flag: `conditioning xl2` selects the
+preset input filter, `conditioning F_HPF N_HPF F_LPF N_LPF` builds a custom band-limiting
+filter (e.g. `conditioning 20 2 23000 4`), and `conditioning none` removes it. With no
+argument it shows the current setting.
 
 `output DIR` sets the directory results are written to, and `name NAME` sets the
 measurement name (the output file stem); files are written to `DIR/NAME_report.csv`,
@@ -352,6 +375,30 @@ engine.run()
 reporter.write("output/measurement")
 ```
 
+Pass an `input_filter` to insert a signal-conditioning filter at the head of every bus, in
+front of the frequency weighting. Use the `PluginXL2InputFilter` preset, the generic
+`PluginInputFilter` (bind cutoffs/orders with `functools.partial`), or resolve a spec string
+with `resolve_signal_conditioning`:
+
+```python
+from functools import partial
+from slm import assemble_engine, parse_metric, PluginInputFilter, PluginXL2InputFilter
+from slm.app import resolve_signal_conditioning
+
+specs = [parse_metric("LZeq")]
+
+# preset
+engine, _ = assemble_engine(specs, controller, dt=1.0, input_filter=PluginXL2InputFilter)
+
+# custom (23 kHz 4th-order LPF + 20 Hz 2nd-order HPF; order 0 disables a stage)
+custom = partial(PluginInputFilter, lpf_fc=23_000, lpf_order=4, hpf_fc=20, hpf_order=2)
+engine, _ = assemble_engine(specs, controller, dt=1.0, input_filter=custom)
+
+# — or — resolve the same string the CLI/config accepts ("xl2" or "F_HPF N_HPF F_LPF N_LPF")
+engine, _ = assemble_engine(specs, controller, dt=1.0,
+                            input_filter=resolve_signal_conditioning("20 2 23000 4"))
+```
+
 A metric name is parsed in two passes: `parse_metric` produces a `MetricSpec`
 (the parsed name), and `plan_chain` lowers that into a `ChainPlan` — a structural,
 engine-free description of the plugin/meter chain (a tuple of `NodeReq` ending in a
@@ -406,6 +453,7 @@ A TOML file lets you pin every measurement option so runs are reproducible.
 dt     = 1.0                      # logging interval in seconds (default: 1.0)
 output = "output/my_measurement"  # path prefix for output CSV files (default: output/measurement)
 warmup = 0.0                      # settle time in seconds before measuring (default: 0.0)
+# signal_conditioning = "xl2"     # optional input filter in front of the weighting (default: none)
 
 [metrics]
 require = [
@@ -434,6 +482,7 @@ python -m slm --file recording.wav --config config.toml --fs-db 128.1
 | `dt` | float | `1.0` | Logging interval in seconds. Each metric is sampled once per `dt` seconds and written as one row in the output CSV. |
 | `output` | string | `"output/measurement"` | Output path prefix. Broadband results go to `{output}_report.csv`; per-band RTA results go to `{output}_rta_report.csv`. In the REPL the directory and name halves are set separately with `output` and `name`. |
 | `warmup` | float | `0.0` | Settle time in seconds before measuring. The signal is processed but not logged during warm-up, then the meters are reset so the accumulators ignore the start-up filter transient. Logged timestamps restart at 0 afterwards. |
+| `signal_conditioning` | string | `"none"` | Signal-conditioning filter inserted at the head of every bus, in front of the frequency weighting. `"xl2"` applies a preset band-limiting analog input filter (4.4 Hz Butterworth high-pass + 23 kHz Butterworth low-pass); a custom `"F_HPF N_HPF F_LPF N_LPF"` spec builds a filter with those cutoffs/orders (order `0` disables a stage); `"none"` leaves the chain unconditioned. |
 
 > **Note on `dt` resolution.** Log rows are written on block edges, so the logging
 > cadence is quantized to the block duration (`blocksize/fs`). A `dt` that is an exact

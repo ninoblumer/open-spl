@@ -5,7 +5,7 @@ import cmd
 import gc
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
 from slm.io.controller import Controller
@@ -14,6 +14,105 @@ from slm.io.thread_priority import high_priority
 
 if TYPE_CHECKING:
     from slm.app.config import SLMConfig
+
+
+# ---------------------------------------------------------------------------
+# Signal conditioning
+# ---------------------------------------------------------------------------
+
+def _xl2_input_filter() -> type:
+    from slm.frequency_weighting import PluginXL2InputFilter
+    return PluginXL2InputFilter
+
+
+# Named signal-conditioning presets selectable from the CLI / config: each maps
+# a user-facing name to a zero-arg factory returning the plugin class inserted at
+# the head of every bus (in front of the frequency weighting). Factories keep the
+# plugin imports lazy so importing this module stays cheap. Besides these names, a
+# custom band-limiting filter is accepted as four values ``F_HPF N_HPF F_LPF
+# N_LPF`` (cutoffs in Hz, orders as integers; an order of 0 disables that stage).
+SIGNAL_CONDITIONING: dict[str, "Callable[[], type]"] = {
+    "xl2": _xl2_input_filter,
+}
+
+
+def _parse_custom_conditioning(parts: "list[str]") -> "tuple[float, int, float, int]":
+    """Parse a custom ``F_HPF N_HPF F_LPF N_LPF`` spec into typed values.
+
+    Returns ``(f_hpf, n_hpf, f_lpf, n_lpf)``. Raises :exc:`ValueError` for a
+    malformed spec or a negative filter order.
+    """
+    try:
+        f_hpf = float(parts[0])
+        n_hpf = int(parts[1])
+        f_lpf = float(parts[2])
+        n_lpf = int(parts[3])
+    except (ValueError, IndexError):
+        raise ValueError(
+            "custom signal conditioning expects four values 'F_HPF N_HPF F_LPF "
+            "N_LPF' (cutoffs in Hz, orders as integers)"
+        ) from None
+    if n_hpf < 0 or n_lpf < 0:
+        raise ValueError(
+            "filter orders must be >= 0 (0 disables the stage), got "
+            f"N_HPF={n_hpf}, N_LPF={n_lpf}"
+        )
+    return f_hpf, n_hpf, f_lpf, n_lpf
+
+
+def normalize_signal_conditioning(value: str | None) -> str | None:
+    """Validate and canonicalize a signal-conditioning spec (``None``/``"none"`` → ``None``).
+
+    Accepts a registered preset name (e.g. ``"xl2"``) or a custom
+    ``"F_HPF N_HPF F_LPF N_LPF"`` spec. Raises :exc:`ValueError` for anything
+    else, so a bad value fails fast at parse/load time.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    lname = text.lower()
+    if lname in ("", "none"):
+        return None
+    if lname in SIGNAL_CONDITIONING:
+        return lname
+    parts = text.split()
+    if len(parts) == 4:
+        f_hpf, n_hpf, f_lpf, n_lpf = _parse_custom_conditioning(parts)
+        return f"{f_hpf} {n_hpf} {f_lpf} {n_lpf}"
+    valid = ", ".join(sorted(SIGNAL_CONDITIONING)) or "(none)"
+    raise ValueError(
+        f"Unknown signal conditioning {value!r}; expected one of: {valid}, none, "
+        "or a custom 'F_HPF N_HPF F_LPF N_LPF' spec"
+    )
+
+
+def resolve_signal_conditioning(value: str | None) -> "type | Callable | None":
+    """Resolve a signal-conditioning spec to a plugin factory (``None`` → ``None``).
+
+    A registered preset name resolves to its plugin class; a custom
+    ``"F_HPF N_HPF F_LPF N_LPF"`` spec resolves to a
+    :class:`~slm.frequency_weighting.PluginInputFilter` factory with those
+    cutoffs/orders bound. Both are callable with the bus keyword arguments.
+    Raises :exc:`ValueError` for an unknown spec.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    lname = text.lower()
+    if lname in SIGNAL_CONDITIONING:
+        return SIGNAL_CONDITIONING[lname]()
+    parts = text.split()
+    if len(parts) == 4:
+        from functools import partial
+        from slm.frequency_weighting import PluginInputFilter
+        f_hpf, n_hpf, f_lpf, n_lpf = _parse_custom_conditioning(parts)
+        return partial(PluginInputFilter, hpf_fc=f_hpf, hpf_order=n_hpf,
+                       lpf_fc=f_lpf, lpf_order=n_lpf)
+    valid = ", ".join(sorted(SIGNAL_CONDITIONING)) or "(none)"
+    raise ValueError(
+        f"Unknown signal conditioning {value!r}; expected one of: {valid}, none, "
+        "or a custom 'F_HPF N_HPF F_LPF N_LPF' spec"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -186,9 +285,10 @@ def _build_and_run_engine(
     from slm.io.display import make_display_fn
 
     specs = [parse_metric(m) for m in config.metrics]
+    input_filter = resolve_signal_conditioning(config.signal_conditioning)
     display_fn = make_display_fn(display_mode, precision=2, controller=controller) if print_to_console else None
     reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
-    engine, bindings = assemble_engine(specs, controller, dt=config.dt)
+    engine, bindings = assemble_engine(specs, controller, dt=config.dt, input_filter=input_filter)
     reporter.add_columns(bindings)
     engine.on_record = reporter.record
 
@@ -321,8 +421,9 @@ class SLMShell(cmd.Cmd):
     """Interactive SLM REPL.
 
     Commands: add, remove, file, device, generator, sensitivity, calibrate,
-              output, name, warmup, dt, queue, samplerate, blocksize, show, save,
-              load, start, display, realtime, tree, inspect, exit/quit/EOF.
+              output, name, warmup, conditioning, dt, queue, samplerate, blocksize,
+              show, save, load, start, display, realtime, tree, inspect,
+              exit/quit/EOF.
     """
 
     intro = (
@@ -620,6 +721,35 @@ than from the initial filter transient.  Set 0 to disable.
         self._config.warmup = warmup
         print(f"Warm-up: {warmup} s")
 
+    def do_conditioning(self, arg: str) -> None:
+        """conditioning [SPEC] — set the signal-conditioning input filter.
+
+SPEC is a preset name or a custom band-limiting spec:
+  none                     no input filter (default)
+  xl2                      preset: 4.4 Hz HPF + 23 kHz LPF (4th-order Butterworth)
+  F_HPF N_HPF F_LPF N_LPF  custom: high-pass cutoff/order then low-pass cutoff/order
+                           (cutoffs in Hz, integer orders; order 0 disables a stage)
+
+The filter is inserted at the head of every broadband metering chain, in front
+of the frequency weighting.
+
+Examples:
+  conditioning               show current setting
+  conditioning xl2           use the xl2 preset
+  conditioning 20 2 23000 4  custom: 20 Hz 2nd-order HPF + 23 kHz 4th-order LPF
+  conditioning none          remove the input filter
+"""
+        arg = arg.strip()
+        if not arg:
+            print(f"  Conditioning: {self._config.signal_conditioning or 'none'}")
+            return
+        try:
+            self._config.signal_conditioning = normalize_signal_conditioning(arg)
+        except ValueError as exc:
+            print(f"Invalid signal conditioning: {exc}")
+            return
+        print(f"  Conditioning: {self._config.signal_conditioning or 'none'}")
+
     def do_dt(self, arg: str) -> None:
         """dt SECONDS — set the logging interval.
 
@@ -724,6 +854,7 @@ Examples:
         print(f"  Sensitivity: {'(not set)' if self._sensitivity_v is None else self._sensitivity_v}")
         print(f"  dt:          {self._config.dt} s")
         print(f"  Warm-up:     {self._config.warmup} s")
+        print(f"  Conditioning:{' '}{self._config.signal_conditioning or 'none'}")
         print(f"  Sample rate: {self._samplerate} Hz")
         print(f"  Block size:  {self._blocksize} samples")
         print(f"  Queue max:   {self._config.queue_maxsize} blocks")

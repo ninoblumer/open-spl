@@ -106,6 +106,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--signal-conditioning", nargs="+", default=None, metavar="SPEC",
+        help="Insert a signal-conditioning filter at the head of every metering "
+             "chain, in front of the frequency weighting. Accepts a preset name "
+             "('xl2' applies a band-limiting analog input filter: 4.4 Hz HPF + 23 "
+             "kHz LPF; 'none' leaves the chain unconditioned, the default), or a "
+             "custom band-limiting spec as four values 'F_HPF N_HPF F_LPF N_LPF' "
+             "(cutoffs in Hz, orders as integers; an order of 0 disables that "
+             "stage, negative orders are rejected).",
+    )
+
+    parser.add_argument(
         "--display", choices=("plain", "bars"), default="plain",
         help="Console display mode: 'plain' scrolling text (default) or 'bars' "
              "live-updating bar graph (requires a TTY; falls back to plain)",
@@ -124,7 +135,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sens_group = parser.add_mutually_exclusive_group()
     sens_group.add_argument(
         "--fs-db", type=float, metavar="DB",
-        help="WAV full-scale annotation in dBSPL (from XL2 filename, e.g. 128.1)",
+        help="WAV full-scale annotation in dBSPL (e.g. 128.1)",
     )
     sens_group.add_argument(
         "--sensitivity-dbv", type=float, metavar="DBV",
@@ -136,6 +147,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _conditioning_value(tokens: "list[str] | None") -> str | None:
+    """Canonicalize the ``--signal-conditioning`` tokens to a config value.
+
+    ``None``/``["none"]`` → ``None``; a preset name or a custom
+    ``F_HPF N_HPF F_LPF N_LPF`` spec → its canonical string. Raises
+    :exc:`ValueError` for an invalid spec.
+    """
+    if tokens is None:
+        return None
+    from slm.app.cli import normalize_signal_conditioning
+    return normalize_signal_conditioning(" ".join(tokens))
 
 
 def _resolve_sensitivity(args: argparse.Namespace) -> float | None:
@@ -173,6 +197,13 @@ def main() -> None:
 
     if args.blocksize < 1:
         parser.error("--blocksize must be a positive integer")
+
+    # Canonicalize --signal-conditioning (list of tokens) to a single config value.
+    if args.signal_conditioning is not None:
+        try:
+            args.signal_conditioning = _conditioning_value(args.signal_conditioning)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     # ------------------------------------------------------------------ #
     # Interactive REPL                                                     #
@@ -217,6 +248,8 @@ def main() -> None:
                 config.warmup = args.warmup
             if args.queue_maxsize is not None:
                 config.queue_maxsize = args.queue_maxsize
+            if args.signal_conditioning is not None:
+                config.signal_conditioning = args.signal_conditioning
         else:
             config = SLMConfig.from_args(
                 metrics=list(args.measure) if args.measure else [],
@@ -224,6 +257,7 @@ def main() -> None:
                 output=args.output if args.output is not None else "output/measurement",
                 queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else DEFAULT_QUEUE_MAXSIZE,
                 warmup=args.warmup if args.warmup is not None else 0.0,
+                signal_conditioning=args.signal_conditioning,
             )
 
         # Parse device: try int, fall back to string
@@ -291,6 +325,8 @@ def main() -> None:
             config.warmup = args.warmup
         if args.queue_maxsize is not None:
             config.queue_maxsize = args.queue_maxsize
+        if args.signal_conditioning is not None:
+            config.signal_conditioning = args.signal_conditioning
     else:
         if not args.measure:
             parser.error(
@@ -303,6 +339,7 @@ def main() -> None:
             output=args.output if args.output is not None else "output/measurement",
             queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else DEFAULT_QUEUE_MAXSIZE,
             warmup=args.warmup if args.warmup is not None else 0.0,
+            signal_conditioning=args.signal_conditioning,
         )
 
     if not args.file and args.device is None and not args.generator:

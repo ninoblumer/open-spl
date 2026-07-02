@@ -10,6 +10,8 @@ from slm.app.cli import (
     calibrate_from_device,
     run_measurement,
     run_realtime_measurement,
+    normalize_signal_conditioning,
+    resolve_signal_conditioning,
 )
 
 __all__ = [
@@ -23,4 +25,6 @@ __all__ = [
     "calibrate_from_device",
     "run_measurement",
     "run_realtime_measurement",
+    "normalize_signal_conditioning",
+    "resolve_signal_conditioning",
 ]

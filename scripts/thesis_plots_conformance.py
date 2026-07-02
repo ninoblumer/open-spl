@@ -34,7 +34,9 @@ sys.path.insert(0, "tests/iec61260")
 sys.path.insert(0, "tests/xl2")
 
 # ── SLM imports ───────────────────────────────────────────────────────────────
-from slm.frequency_weighting import PluginAWeighting, PluginCWeighting, PluginZWeighting
+from slm.frequency_weighting import (
+    PluginAWeighting, PluginCWeighting, PluginZWeighting, PluginXL2InputFilter,
+)
 from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
 
 # ── test-suite helpers ────────────────────────────────────────────────────────
@@ -49,16 +51,98 @@ from test_61672_time_weightings import _mock_bus, _process_steady
 from test_61672_toneburst import _toneburst_response, _TABLE4, _TABLE4_SMAX
 from test_61672_cpeak import _cpeak_minus_lc, _TABLE5
 from test_61672_level_linearity import _get_sweep
-from test_xl2_broadband import (
-    compute_leq, compute_lmax, compute_lpeak,
-    compute_interval_leq,
-    _PluginXL2Z, TOLERANCE_DB,
-)
-from test_xl2_rta import compute_octave_leq
 from conftest import XL2Measurement
 from slm.engine import Engine
 from slm.io.file_controller import FileController
 from slm.octave_band import PluginOctaveBand
+from slm.meter import LeqAccumulator, MaxAccumulator
+from slm.time_weighting import PluginSquare
+
+
+# ── XL2 broadband comparison helpers (inlined; formerly tests/xl2/test_xl2_broadband.py) ──
+# Feed a recording's WAV through the SLM offline and read back one metric. The
+# optional *input_filter* (e.g. PluginXL2InputFilter) is the signal-conditioning
+# filter inserted at the head of the bus, in front of the frequency weighting.
+TOLERANCE_DB = 0.18   # ±0.18 dB SLM-vs-XL2 agreement band used to flag the figures
+
+
+def _xl2_controller(meas, blocksize):
+    controller = FileController(str(meas.wav_path), blocksize=blocksize)
+    controller.set_sensitivity(meas.sensitivity, unit="V")
+    return controller
+
+
+def compute_leq(meas, weighting_cls, blocksize=1024, input_filter=None):
+    """Overall Leq (energy mean over the whole file)."""
+    controller = _xl2_controller(meas, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", weighting_cls, input_filter=input_filter)
+    sum_sq = np.float64(0.0)
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+        sum_sq += np.sum(bus.frequency_weighting.output ** 2)
+    p_ref_sq = (20e-6 * meas.sensitivity) ** 2
+    return 10 * np.log10(sum_sq / meas.n_frames / p_ref_sq)
+
+
+def compute_lmax(meas, weighting_cls, tw_cls, blocksize=1024, input_filter=None):
+    """Lmax: running maximum of the time-weighted level."""
+    controller = _xl2_controller(meas, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", weighting_cls, input_filter=input_filter)
+    time_w = bus.add_plugin(tw_cls(input=bus.frequency_weighting, zero_zi=True))
+    time_w.add_meter(MaxAccumulator(name="max", parent=time_w))
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+    return time_w.read_db("max")[0]
+
+
+def compute_lpeak(meas, weighting_cls, blocksize=1024, input_filter=None):
+    """Lpeak: max instantaneous squared pressure (no time weighting)."""
+    controller = _xl2_controller(meas, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", weighting_cls, input_filter=input_filter)
+    sq = bus.add_plugin(PluginSquare(input=bus.frequency_weighting, zero_zi=True))
+    sq.add_meter(MaxAccumulator(name="peak", parent=sq))
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+    return sq.read_db("peak")[0]
+
+
+def compute_interval_leq(meas, weighting_cls, dt=1.0, blocksize=4800, input_filter=None):
+    """Per-interval Leq (LWeq_dt), tracking interval boundaries manually."""
+    controller = _xl2_controller(meas, blocksize)
+    engine = Engine(controller, dt=1e9)
+    bus = engine.add_bus("bus", weighting_cls, input_filter=input_filter)
+    sq = bus.add_plugin(PluginSquare(input=bus.frequency_weighting, zero_zi=True))
+    meter = sq.create_meter(LeqAccumulator, name="leq")
+    interval_samples = int(dt * controller.samplerate)
+    results = []
+    n_acc = 0
+    while True:
+        try:
+            block, _ = controller.read_block()
+        except StopIteration:
+            break
+        bus.process(block.T)
+        n_acc += blocksize
+        if n_acc >= interval_samples:
+            results.append(sq.read_db("leq"))
+            meter.reset()
+            n_acc -= interval_samples
+    return np.array(results)[:, 0]
 
 # ── colors ────────────────────────────────────────────────────────────────────
 C_BLUE    = "#2166ac"
@@ -92,6 +176,14 @@ else:
 # ── output ────────────────────────────────────────────────────────────────────
 OUT = Path("thesis_figures")
 OUT.mkdir(exist_ok=True)
+
+# When True, the XL2 analog input filter (PluginXL2InputFilter: 4.4 Hz HPF +
+# 23 kHz LPF) is inserted in front of Z weighting for the XL2 broadband LZeq
+# comparisons (figs 4.7, 4.8), reproducing the XL2's broadband Z roll-off. Set
+# False to compare against flat Z (input filter deactivated).
+USE_XL2_INPUT_FILTER = False
+
+_XL2_INPUT_FILTER = PluginXL2InputFilter if USE_XL2_INPUT_FILTER else None
 
 
 def save(fig, name):
@@ -1209,7 +1301,7 @@ def make_fig_4_7():
     def _slm_val(meas, m):
         if m == "LAeq":   return compute_leq(meas, PluginAWeighting)
         if m == "LCeq":   return compute_leq(meas, PluginCWeighting)
-        if m == "LZeq":   return compute_leq(meas, _PluginXL2Z)
+        if m == "LZeq":   return compute_leq(meas, PluginZWeighting, input_filter=_XL2_INPUT_FILTER)
         if m == "LAFmax": return compute_lmax(meas, PluginAWeighting, PluginFastTimeWeighting)
         if m == "LASmax": return compute_lmax(meas, PluginAWeighting, PluginSlowTimeWeighting)
         if m == "LCpeak": return compute_lpeak(meas, PluginCWeighting)
@@ -1295,7 +1387,8 @@ def make_fig_4_8():
 
     # Compute per-second LZeq (offset = 0)
     print("  computing per-second LZeq for SLM_001…")
-    slm_vals = compute_interval_leq(meas_001, _PluginXL2Z, dt=1.0)
+    slm_vals = compute_interval_leq(meas_001, PluginZWeighting, dt=1.0,
+                                    input_filter=_XL2_INPUT_FILTER)
     n = min(len(slm_vals), n)
     slm_vals = slm_vals[:n]
     xl2_vals = xl2_vals[:n]

@@ -175,6 +175,43 @@ class TestParseMetricInvalid:
 # Structural tests (synthetic WAV)
 # ---------------------------------------------------------------------------
 
+class TestSignalConditioning:
+    """The optional bus input filter (signal conditioning) sits in front of the
+    frequency weighting on every bus."""
+
+    def _engine(self, tmp_path, metrics, input_filter):
+        wav = tmp_path / "sine.wav"
+        _write_sine(wav)
+        controller = FileController(str(wav), blocksize=1024)
+        controller.set_sensitivity(1.0, unit="V")
+        specs = [parse_metric(n) for n in metrics]
+        engine, _ = assemble_engine(specs, controller, dt=10.0, input_filter=input_filter)
+        return engine
+
+    def test_no_input_filter_by_default(self, tmp_path):
+        engine = self._engine(tmp_path, ["LAeq", "LCeq"], input_filter=None)
+        for bus in engine._busses.values():
+            assert bus.input_filter is None
+            assert bus.frequency_weighting.input is bus   # weighting reads the raw bus
+
+    def test_input_filter_inserted_in_front_of_weighting(self, tmp_path):
+        from slm.frequency_weighting import PluginXL2InputFilter
+        engine = self._engine(tmp_path, ["LAeq", "LZeq"], input_filter=PluginXL2InputFilter)
+        assert set(engine._busses.keys()) == {"A", "Z"}
+        for bus in engine._busses.values():
+            assert isinstance(bus.input_filter, PluginXL2InputFilter)
+            assert bus.input_filter.input is bus                    # filter reads the raw bus
+            assert bus.frequency_weighting.input is bus.input_filter  # weighting reads the filter
+
+    def test_conditioned_run_produces_finite_output(self, tmp_path):
+        from slm.frequency_weighting import PluginXL2InputFilter
+        engine = self._engine(tmp_path, ["LAeq"], input_filter=PluginXL2InputFilter)
+        engine.run()
+        bus = engine._busses["A"]
+        sq = next(p for p in bus.plugins if isinstance(p, PluginSquare))
+        assert np.isfinite(sq.read_db("LAeq")[0])
+
+
 class TestBuildChainStructure:
 
     def test_shared_bus_for_same_weighting(self, tmp_path):

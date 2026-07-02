@@ -8,6 +8,22 @@ from pathlib import Path
 from slm.io.realtime_controller import DEFAULT_QUEUE_MAXSIZE
 
 
+def _normalize_signal_conditioning(value) -> str | None:
+    """Validate and canonicalize a signal-conditioning spec; ``None``/``"none"`` → ``None``.
+
+    Accepts a registered preset name (e.g. ``"xl2"``) or a custom
+    ``"F_HPF N_HPF F_LPF N_LPF"`` spec. Delegates to
+    :func:`slm.app.cli.normalize_signal_conditioning`, so a bad config value
+    fails fast at load time.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"signal_conditioning must be a string, got {value!r}")
+    from slm.app.cli import normalize_signal_conditioning
+    return normalize_signal_conditioning(value)
+
+
 @dataclass
 class SLMConfig:
     """Measurement configuration."""
@@ -17,6 +33,11 @@ class SLMConfig:
     output: str = "output/measurement"
     warmup: float = 0.0
     queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE
+    signal_conditioning: str | None = None
+    """Signal-conditioning filter to insert in front of every frequency weighting:
+    a preset name (e.g. ``"xl2"``) or a custom ``"F_HPF N_HPF F_LPF N_LPF"``
+    band-limiting spec, or ``None`` for an unconditioned chain. Resolved to a
+    plugin factory by ``slm.app.cli.resolve_signal_conditioning``."""
 
     # ------------------------------------------------------------------
     # TOML I/O
@@ -36,7 +57,9 @@ class SLMConfig:
             raise ValueError(f"Unknown TOML sections: {unknown_sections}")
 
         meas = data.get("measurement", {})
-        unknown_meas = set(meas.keys()) - {"dt", "output", "warmup", "queue_maxsize"}
+        unknown_meas = set(meas.keys()) - {
+            "dt", "output", "warmup", "queue_maxsize", "signal_conditioning"
+        }
         if unknown_meas:
             raise ValueError(f"Unknown keys in [measurement]: {unknown_meas}")
 
@@ -63,12 +86,15 @@ class SLMConfig:
         if warmup < 0:
             raise ValueError(f"[measurement] warmup must be non-negative, got {warmup}")
 
+        conditioning = _normalize_signal_conditioning(meas.get("signal_conditioning"))
+
         return cls(
             metrics=list(require),
             dt=dt,
             output=str(meas.get("output", "output/measurement")),
             warmup=warmup,
             queue_maxsize=queue_maxsize,
+            signal_conditioning=conditioning,
         )
 
     def to_toml(self, path: str | Path) -> None:
@@ -82,12 +108,17 @@ class SLMConfig:
         else:
             metrics_value = "[]"
 
+        conditioning_line = (
+            f'signal_conditioning = "{self.signal_conditioning}"\n'
+            if self.signal_conditioning else ""
+        )
         content = (
             "[measurement]\n"
             f"dt            = {self.dt}\n"
             f'output        = "{self.output}"\n'
             f"warmup        = {self.warmup}\n"
             f"queue_maxsize = {self.queue_maxsize}\n"
+            f"{conditioning_line}"
             "\n"
             "[metrics]\n"
             f"require = {metrics_value}\n"
@@ -101,7 +132,9 @@ class SLMConfig:
     @classmethod
     def from_args(cls, metrics: list[str], dt: float, output: str,
                   queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
-                  warmup: float = 0.0) -> "SLMConfig":
+                  warmup: float = 0.0,
+                  signal_conditioning: str | None = None) -> "SLMConfig":
         """Construct from parsed command-line arguments."""
         return cls(metrics=list(metrics), dt=dt, output=output,
-                   queue_maxsize=queue_maxsize, warmup=warmup)
+                   queue_maxsize=queue_maxsize, warmup=warmup,
+                   signal_conditioning=_normalize_signal_conditioning(signal_conditioning))

@@ -391,6 +391,7 @@ def meter_class_name(meter: MeterReq) -> str:
 def build_chain(
     specs: list[MetricSpec],
     engine: Engine,
+    input_filter: type | None = None,
 ) -> list[ColumnBinding]:
     """Wire buses, plugins, and meters for *specs* into *engine*; return the
     report-column bindings (the caller registers them with a sink).
@@ -411,6 +412,10 @@ def build_chain(
     Args:
         specs:  List of parsed metric descriptors, typically from :func:`parse_metric`.
         engine: The :class:`~slm.engine.Engine` instance to attach buses to.
+        input_filter: Optional signal-conditioning plugin class inserted at the
+            head of every bus, in front of the frequency weighting (e.g.
+            :class:`~slm.frequency_weighting.PluginInputFilter` to model an
+            SLM's analog input filter). ``None`` leaves the chain unconditioned.
 
     Returns:
         One :class:`ColumnBinding` per spec, describing the report column it
@@ -457,7 +462,7 @@ def build_chain(
     def get_bus(w: str) -> Bus:
         """Return the frequency-weighted bus for letter *w*, creating it if needed."""
         if w not in buses:
-            buses[w] = engine.add_bus(w, _w_cls[w])
+            buses[w] = engine.add_bus(w, _w_cls[w], input_filter=input_filter)
         return buses[w]
 
     def build_node(node: NodeReq, pred: "PluginMeter | None") -> PluginMeter:
@@ -525,6 +530,7 @@ def assemble_engine(
     specs: list[MetricSpec],
     controller,
     dt: float = 0.1,
+    input_filter: type | None = None,
 ) -> tuple[Engine, list[ColumnBinding]]:
     """Create an :class:`~slm.engine.Engine` for *controller* and wire *specs*.
 
@@ -537,8 +543,11 @@ def assemble_engine(
         reporter.add_columns(bindings)
         engine.on_record = reporter.record
         engine.run()
+
+    *input_filter* is an optional signal-conditioning plugin class inserted at
+    the head of every bus (see :func:`build_chain`).
     """
     from slm.engine import Engine
     engine = Engine(controller, dt=dt)
-    bindings = build_chain(specs, engine)
+    bindings = build_chain(specs, engine, input_filter=input_filter)
     return engine, bindings

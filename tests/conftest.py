@@ -95,6 +95,61 @@ class XL2Measurement:
         df = self.log.sections["Broadband LOG Results"].df
         return df[col].astype(float).values
 
+    def _rta_results_section(self):
+        """The RTA report's results section (tolerating a trailing space in the header)."""
+        for key, section in self.rta_report.sections.items():
+            if key.strip() == "RTA Results":
+                return section
+        raise KeyError("No 'RTA Results' section in RTA report")
+
+    def rta_lzeq(self) -> np.ndarray:
+        """Whole-measurement 1/1- or 1/3-octave LZeq spectrum (one value per band)."""
+        return self._rta_results_section().df.loc["LZeq"].astype(float).values
+
+    def rta_metric(self) -> str:
+        """Metric name whose band set matches this recording's XL2 RTA spectrum.
+
+        The XL2 RTA is 1/1-octave (12 bands, 8 Hz–16 kHz) or 1/3-octave (36 bands,
+        6.3 Hz–20 kHz); pick the metric so the SLM produces the same bands in the
+        same order (they can then be compared position-by-position).
+        """
+        n_bands = len(self.rta_lzeq())
+        if n_bands <= 13:
+            return "LZeq:bands:8-16000"          # 1/1-octave, 12 bands
+        return "LZeq:bands:1/3:6.3-20000"        # 1/3-octave, 36 bands
+
+
+# --------------------------------------------------------------------------- #
+# Cross-dataset recording discovery (XL2 integration suite)                    #
+# --------------------------------------------------------------------------- #
+
+# Both reference sets: slm-test-01 is electrical (signal generator → XL2), slm-test-02
+# is acoustic (microphone recordings). SLM_002 is excluded from the validation suite
+# in both sets (electrical SLM_002 is an unused low-level chirp; acoustic SLM_002 is a
+# quiet background dominated by sub-audio energy that flat Z legitimately integrates).
+XL2_DATA_DIRS = (Path("data/slm-test-01"), Path("data/slm-test-02"))
+XL2_EXCLUDE_KEYS = frozenset({"SLM_002"})
+
+
+def discover_xl2_recordings() -> list[tuple[Path, str, str]]:
+    """Find every ``SLM_NNN`` recording across both datasets (minus the exclusions).
+
+    Returns ``(data_dir, name, key)`` tuples, e.g.
+    ``(Path('data/slm-test-01'), '2026-02-06_SLM_000', 'SLM_000')``.
+    """
+    recordings: list[tuple[Path, str, str]] = []
+    for data_dir in XL2_DATA_DIRS:
+        for wav in sorted(data_dir.glob("*_Audio_*.wav")):
+            match = re.search(r"(\d{4}-\d{2}-\d{2}_SLM_\d{3})", wav.name)
+            if not match:
+                continue
+            name = match.group(1)
+            key = name.split("_", 1)[1]        # 'SLM_000'
+            if key in XL2_EXCLUDE_KEYS:
+                continue
+            recordings.append((data_dir, name, key))
+    return recordings
+
 
 # --------------------------------------------------------------------------- #
 # Session-scoped fixtures — one per XL2 measurement set                       #

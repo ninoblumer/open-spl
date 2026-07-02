@@ -37,8 +37,10 @@ class Engine:
         # assign ``engine.on_record`` after construction.  Defaults to a no-op.
         self.on_record: RecordCallback = on_record or _noop_record
 
-    def add_bus(self, name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None) -> Bus:
-        bus = Bus(engine=self, name=name, frequency_weighting=frequency_weighting)
+    def add_bus(self, name: str, frequency_weighting: type[PluginFrequencyWeighting] | None = None,
+                input_filter: type | None = None) -> Bus:
+        bus = Bus(engine=self, name=name, frequency_weighting=frequency_weighting,
+                  input_filter=input_filter)
         self._busses[name] = bus
         return bus
 
