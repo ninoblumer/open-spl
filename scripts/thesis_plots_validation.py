@@ -139,7 +139,7 @@ def discover(data_dir: Path) -> dict[str, Recording]:
     labels = {
         "SLM_000": "94 dB / 1 kHz calibration tone",
         "SLM_001": "Pink noise",
-        "SLM_002": "Background noise",
+        "SLM_002": "Road traffic noise",
         "SLM_003": "Tapping machine",
         "SLM_004": "Manual hammering",
     }

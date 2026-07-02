@@ -12,8 +12,10 @@ Both reference sets are covered (see :func:`tests.conftest.discover_xl2_recordin
   which logged its metrics and recorded the WAV.
 * ``slm-test-02`` — *acoustic*: real microphone recordings.
 
-SLM_002 is excluded in both sets (see conftest). Calibration is purely from each
-recording's ``FSxxx.xdB(PK)`` filename annotation — no per-recording tuning.
+slm-test-01's SLM_002 (an unused electrical chirp) is excluded; slm-test-02's
+SLM_002 (road-traffic noise) is included (see conftest). Calibration is purely
+from each recording's ``FSxxx.xdB(PK)`` filename annotation — no per-recording
+tuning.
 
 Signal path
 -----------

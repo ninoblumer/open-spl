@@ -124,11 +124,11 @@ class XL2Measurement:
 # --------------------------------------------------------------------------- #
 
 # Both reference sets: slm-test-01 is electrical (signal generator → XL2), slm-test-02
-# is acoustic (microphone recordings). SLM_002 is excluded from the validation suite
-# in both sets (electrical SLM_002 is an unused low-level chirp; acoustic SLM_002 is a
-# quiet background dominated by sub-audio energy that flat Z legitimately integrates).
+# is acoustic (microphone recordings). Exclusions are per-dataset: slm-test-01's SLM_002
+# is an unused low-level electrical chirp, so it is dropped; slm-test-02's SLM_002 is a
+# road-traffic-noise recording (well above the noise floor) and IS part of the suite.
 XL2_DATA_DIRS = (Path("data/slm-test-01"), Path("data/slm-test-02"))
-XL2_EXCLUDE_KEYS = frozenset({"SLM_002"})
+XL2_EXCLUDE = frozenset({("slm-test-01", "SLM_002")})   # (dataset dir name, key)
 
 
 def discover_xl2_recordings() -> list[tuple[Path, str, str]]:
@@ -145,7 +145,7 @@ def discover_xl2_recordings() -> list[tuple[Path, str, str]]:
                 continue
             name = match.group(1)
             key = name.split("_", 1)[1]        # 'SLM_000'
-            if key in XL2_EXCLUDE_KEYS:
+            if (data_dir.name, key) in XL2_EXCLUDE:
                 continue
             recordings.append((data_dir, name, key))
     return recordings
