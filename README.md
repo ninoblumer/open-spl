@@ -521,6 +521,19 @@ default**. Pass `--slow` to include them:
 python -m pytest tests/ -q --slow
 ```
 
+### Conformance margin report
+
+`scripts/conformance_report.py` drives the IEC 61672-1 / IEC 61260-1 test suites and prints
+a formatted table of measured values, limits, and margins from each limit — a quick way to
+see how much headroom the implementation has against every conformance requirement:
+
+```bash
+python scripts/conformance_report.py
+python scripts/conformance_report.py --no-color      # disable ANSI colour
+python scripts/conformance_report.py --precision 4   # decimal places (default: 3)
+python scripts/conformance_report.py --slow          # include §5.14/§5.15 stability tests
+```
+
 ---
 
 ## Real-time load benchmark
