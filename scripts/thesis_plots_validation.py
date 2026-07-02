@@ -77,7 +77,7 @@ from slm.frequency_weighting import (
 )
 from slm.io.file_controller import FileController
 from slm.meter import (
-    LeqAccumulator, MaxAccumulator, MinAccumulator, LEAccumulator, LeqMovingMeter,
+    LeqAccumulator, MaxAccumulator, MinAccumulator, LeqMovingMeter,
 )
 from slm.octave_band import PluginOctaveBand
 from slm.time_weighting import (
@@ -204,13 +204,13 @@ def _metering_source(bus):
 
 def compute_broadband(rec: Recording, blocksize: int = 1024,
                       warmup_s: float = 2.0) -> dict[str, float]:
-    """All broadband scalar metrics in a single pass: eq / S,F,I max,min / E / peak.
+    """All broadband scalar metrics in a single pass: eq / S,F,I max,min / peak.
 
     The time-weighting filters start from zero, so their first samples are a
     settling transient. We let *warmup_s* seconds of signal settle the filters,
     then reset the time-weighted max/min meters (and the peak, which the input
-    filter's cold-start ring would overshoot). ``eq``/``E`` accumulate over the
-    whole file and are unaffected.
+    filter's cold-start ring would overshoot). ``eq`` accumulates over the
+    whole file and is unaffected.
     """
     controller = _controller(rec, blocksize)
     engine = Engine(controller, dt=1e9)            # never logs; we read at the end
@@ -223,13 +223,12 @@ def compute_broadband(rec: Recording, blocksize: int = 1024,
         bus = engine.add_bus(w, w_cls)
         fw = _metering_source(bus)
 
-        # eq / SEL / peak from the squared (Pa²) pressure.
+        # eq / peak from the squared (Pa²) pressure.
         sq = bus.add_plugin(PluginSquare(input=fw, zero_zi=True))
         sq.create_meter(LeqAccumulator, name="eq")
-        sq.create_meter(LEAccumulator, name="E")
         sq.create_meter(MaxAccumulator, name="peak")
         warmup_meters.append(sq.meters["peak"])   # filter startup overshoots the peak
-        reads += [(f"L{w}eq", sq, "eq"), (f"L{w}E", sq, "E"), (f"L{w}PKmax", sq, "peak")]
+        reads += [(f"L{w}eq", sq, "eq"), (f"L{w}PKmax", sq, "peak")]
 
         # max / min for each time weighting (S/F/I).
         for tw in ("S", "F", "I"):
@@ -454,9 +453,9 @@ def _fmt_hz(f: float) -> str:
 
 # Metric "base" names (weighting letter stripped) in display order.
 # Impulse (I) time weighting is intentionally excluded.
-_BASES = ["eq", "E", "PKmax", "Smax", "Fmax"]
+_BASES = ["eq", "PKmax", "Smax", "Fmax"]
 _BASE_LABEL = {
-    "eq": r"$L_{eq}$", "E": "$L_E$", "PKmax": "$L_{peak}$",
+    "eq": r"$L_{eq}$", "PKmax": "$L_{peak}$",
     "Smax": r"$L_{S,max}$", "Fmax": r"$L_{F,max}$",
 }
 
