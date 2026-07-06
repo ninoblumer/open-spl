@@ -606,20 +606,23 @@ def make_fig_4_3():
     F_LO, F_HI = 31.0, 38.5
     S_LO, S_HI = 3.6,  5.1
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(11, 5.5),
+                                  gridspec_kw={"width_ratios": [1.9, 1]})
 
-    # ── acceptance-limit wedges (gray) ────────────────────────────────────────
+    # ── left panel: decay curves ──────────────────────────────────────────────
+    # acceptance-limit wedges (gray)
     t_w = np.array([0.0, 3.5])
-    tol_fill = ax.fill_between(t_w, -F_HI * t_w, -F_LO * t_w,
-                               color=C_FILL, alpha=0.9, zorder=1,
-                               label="Class 1 acceptance limits")
+    ax.fill_between(t_w, -F_HI * t_w, -F_LO * t_w,
+                    color=C_FILL, alpha=0.9, zorder=1,
+                    label="Class 1 acceptance limits")
     ax.fill_between(t_w, -S_HI * t_w, -S_LO * t_w,
                     color=C_FILL, alpha=0.9, zorder=1)
 
-    # ── decay curves ─────────────────────────────────────────────────────────
-    ax.plot(t_F, np.clip(l_F, -50, 0), color=C_BLUE, lw=2,
+    # Raw curves — set_ylim crops the view (no data clipping, which would leave a
+    # false knee where Fast flattens against the clip floor).
+    ax.plot(t_F, l_F, color=C_BLUE, lw=2,
             label=r"Fast (F), $\tau$ = 125 ms", zorder=3)
-    ax.plot(t_S, np.clip(l_S, -50, 0), color=C_RED,  lw=2,
+    ax.plot(t_S, l_S, color=C_RED,  lw=2,
             label=r"Slow (S), $\tau$ = 1 s",   zorder=3)
 
     ax.axhline(0, color="black", lw=0.8)
@@ -629,41 +632,50 @@ def make_fig_4_3():
     ax.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
     ax.set_xlabel("Time after cessation (s)")
     ax.set_ylabel("Level relative to steady state (dB)")
-    ax.set_title("IEC 61672-1:2013 §5.8 — Time Weighting Decay")
+    ax.set_title("Time-weighting decay")
     ax.legend(loc="upper right", bbox_to_anchor=(0.97, 0.95), fontsize=8)
 
-    # ── inset: bar chart of decay rates with acceptance limits ────────────────
-    ax_in = ax.inset_axes([0.4575, 0.13, 0.5125, 0.45])
-    ax_in.set_facecolor("white")
+    # ── right panel: decay-rate deviation from the ideal exponential rate ──────
+    # The one-pole detector decays as exp(-t/τ), i.e. a level slope of
+    # 10/ln(10)/τ dB/s; the §5.8 class 1 limits bracket that ideal rate. Plotting
+    # (measured − ideal) puts F and S on one axis despite their ~8x rate ratio.
+    ideal_F = 10.0 / np.log(10.0) / tau_F
+    ideal_S = 10.0 / np.log(10.0) / tau_S
+    dev_F,  dev_S  = rate_F - ideal_F, rate_S - ideal_S
+    band_F = (F_LO - ideal_F, F_HI - ideal_F)
+    band_S = (S_LO - ideal_S, S_HI - ideal_S)
+    in_F = F_LO <= rate_F <= F_HI
+    in_S = S_LO <= rate_S <= S_HI
 
-    w = 0.55
     x_F, x_S = 0, 1
+    w = 0.6
 
-    # Acceptance-limit rectangles
-    for x, lo, hi in [(x_F, F_LO, F_HI), (x_S, S_LO, S_HI)]:
-        ax_in.add_patch(mpatches.Rectangle(
-            (x - w/2, lo), w, hi - lo, color=C_FILL, zorder=2))
+    # Acceptance-limit bars (reference ± class 1 limit), centred on the ideal rate.
+    for xi, (lo, hi) in [(x_F, band_F), (x_S, band_S)]:
+        ax2.add_patch(mpatches.Rectangle((xi - w / 2, lo), w, hi - lo,
+                                         color=C_FILL, alpha=0.7, zorder=1))
+    ax2.axhline(0, color=C_GREY, lw=1.5, ls="--", zorder=2)
 
-    # Bars
-    ax_in.bar([x_F], [rate_F], width=w * 0.45, color=C_BLUE, zorder=4)
-    ax_in.bar([x_S], [rate_S], width=w * 0.45, color=C_RED,  zorder=4)
+    # Measured deviation markers, coloured by pass/fail (as in fig_4_5b).
+    ax2.scatter([x_F], [dev_F], c=[C_BLUE if in_F else C_OUT], s=55, zorder=5)
+    ax2.scatter([x_S], [dev_S], c=[C_BLUE if in_S else C_OUT], s=55, zorder=5)
 
-    # Value labels above bars
-    ax_in.text(x_F, rate_F + 0.8, f"{rate_F:.1f}", ha="center", va="bottom",
-               fontsize=7, color=C_BLUE, fontweight="bold")
-    ax_in.text(x_S, rate_S + 0.1, f"{rate_S:.1f}", ha="center", va="bottom",
-               fontsize=7, color=C_RED,  fontweight="bold")
+    band_proxy = mpatches.Patch(color=C_FILL, alpha=0.7, label="Class 1 acceptance limits")
+    ref_proxy  = plt.Line2D([0], [0], color=C_GREY, lw=1.5, ls="--",
+                            label="Ideal exponential rate")
+    meas_proxy = plt.Line2D([0], [0], marker="o", color=C_BLUE, lw=0,
+                            label="Measured decay rate")
+    ax2.legend(handles=[band_proxy, ref_proxy, meas_proxy], fontsize=7, loc="upper right")
 
-    ax_in.set_xticks([x_F, x_S])
-    ax_in.set_xticklabels(["Fast (F)", "Slow (S)"], fontsize=7)
-    ax_in.set_ylabel("dB/s", fontsize=7)
-    ax_in.set_xlim(-0.55, 1.55)
-    ax_in.set_ylim(0, max(rate_F * 1.18, F_HI * 1.1))
-    ax_in.tick_params(labelsize=7)
-    ax_in.set_title("Decay rate", fontsize=8)
-    ax_in.spines["top"].set_visible(False)
-    ax_in.spines["right"].set_visible(False)
+    ax2.set_xticks([x_F, x_S])
+    ax2.set_xticklabels(["Fast (F)", "Slow (S)"], fontsize=8)
+    ax2.set_xlim(-0.6, 1.6)
+    ax2.set_ylim(-5, 5)
+    ax2.yaxis.set_major_locator(ticker.MultipleLocator(1.0))
+    ax2.set_ylabel("Decay-rate deviation from ideal (dB/s)")
+    ax2.set_title("Decay rate vs Class 1 limits")
 
+    fig.suptitle("IEC 61672-1:2013 §5.8 — Time Weighting Decay")
     fig.tight_layout()
     return fig
 
