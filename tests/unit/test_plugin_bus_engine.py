@@ -212,6 +212,54 @@ class TestEngine:
         engine.reset_meters()
         assert all(m._n_samples == 0 for m in accs)
 
+    def test_warmup_source_ends_during_warmup(self):
+        """If the source runs out during warm-up, run() resets the meters and
+        returns without recording anything (warm-up StopIteration path)."""
+        import itertools
+        from slm.io.controller import Controller
+        from slm.engine import Engine
+        from slm.assembly import parse_metric, build_chain
+        from slm.meter import LeqAccumulator
+
+        class FiniteController(Controller):
+            """Yields exactly ``n_blocks`` blocks, then raises StopIteration."""
+            samplerate = SAMPLERATE
+            blocksize = BLOCKSIZE
+            sensitivity = 1.0
+            overruns = 0
+
+            def __init__(self, n_blocks):
+                super().__init__()
+                self._remaining = n_blocks
+
+            def read_block(self):
+                if self._remaining <= 0:
+                    raise StopIteration
+                self._remaining -= 1
+                return np.zeros((self.blocksize, 1), dtype=np.float32), next(self._counter)
+
+            def stop(self): pass
+            def calibrate(self, target_spl=94.0): pass
+
+        ctrl = FiniteController(n_blocks=2)
+        ctrl.set_sensitivity(1.0, unit="V")
+        engine = Engine(ctrl, dt=1.0)
+        build_chain([parse_metric("LAeq")], engine)
+
+        recorded: list = []
+        engine.on_record = lambda ts, dt: recorded.append((ts, dt))
+
+        bd = BLOCKSIZE / SAMPLERATE
+        with ctrl:
+            engine.run(warmup=10 * bd)   # warm-up outlasts the 2 available blocks
+
+        # Nothing was recorded (early return skips the final snapshot) ...
+        assert recorded == []
+        # ... and every accumulating meter was reset.
+        accs = [m for bus in engine._busses.values() for p in bus.plugins
+                for m in getattr(p, "meters", {}).values() if isinstance(m, LeqAccumulator)]
+        assert accs and all(m._n_samples == 0 for m in accs)
+
 
 # ---------------------------------------------------------------------------
 # PluginMeter.add_meter wrong parent

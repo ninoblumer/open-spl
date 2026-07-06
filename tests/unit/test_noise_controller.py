@@ -1,6 +1,7 @@
 """Unit tests for NoiseController."""
 from __future__ import annotations
 
+import queue
 import time
 
 import numpy as np
@@ -93,6 +94,23 @@ class TestReadBlock:
         with pytest.raises(StopIteration):
             ctrl.read_block()
 
+    def test_read_block_raises_immediately_when_empty_and_stopped(self):
+        """Deterministic counterpart to test_stop_raises_stop_iteration: with a
+        queue that reports empty at once, read_block raises StopIteration without
+        waiting out the 0.5 s get() timeout."""
+        ctrl = _make_controller()
+        ctrl._stop_event.set()
+
+        class _EmptyQueue:
+            def get(self, timeout=None):
+                raise queue.Empty
+            def qsize(self):
+                return 0
+
+        ctrl._queue = _EmptyQueue()
+        with pytest.raises(StopIteration):
+            ctrl.read_block()
+
     def test_overrun_on_full_queue(self):
         ctrl = _make_controller(blocksize=64, queue_maxsize=2)
         # Force a full-queue drop by calling _produce logic directly
@@ -176,10 +194,30 @@ class TestNonRealtimeMode:
         ctrl.stop()
         assert ctrl.overruns == 0  # non-realtime mode never drops blocks
 
+    def test_produce_retries_on_full_queue_without_overrun(self):
+        """Deterministic counterpart: drive _produce directly with a queue that
+        always reports full so it takes the queue.Full retry branch, then breaks
+        once the stop event is set. No threads, no real timeouts."""
+        ctrl = _make_controller(blocksize=64, realtime=False)
+        puts = {"n": 0}
 
-@pytest.mark.slow
+        class _FullQueue:
+            def put(self, block, timeout=None):
+                puts["n"] += 1
+                if puts["n"] >= 2:          # let the inner retry loop exit
+                    ctrl._stop_event.set()
+                raise queue.Full
+
+        ctrl._queue = _FullQueue()
+        ctrl._produce()
+
+        assert puts["n"] >= 2          # retried at least once → hit the except branch
+        assert ctrl.overruns == 0      # non-realtime mode never counts overruns
+
+
 class TestNBlocksLimit:
 
+    @pytest.mark.slow
     def test_n_blocks_stops_producer(self):
         """n_blocks caps how many blocks the producer emits, then it self-stops."""
         ctrl = _make_controller(blocksize=64, realtime=False,
@@ -194,6 +232,15 @@ class TestNBlocksLimit:
         finally:
             ctrl.stop()
         assert len(blocks) == 3
+
+    def test_produce_self_stops_after_n_blocks(self):
+        """Deterministic counterpart: running _produce inline (unbounded queue,
+        non-realtime) emits exactly n_blocks then sets the stop event and returns."""
+        ctrl = _make_controller(blocksize=64, realtime=False,
+                                queue_maxsize=16, n_blocks=3)
+        ctrl._produce()
+        assert ctrl._stop_event.is_set()
+        assert ctrl._queue.qsize() == 3
 
 
 class TestEngineIntegration:
