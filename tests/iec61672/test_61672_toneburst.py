@@ -1,8 +1,11 @@
 """IEC 61672-1:2013 §5.9 Table 4 — toneburst response (class 1).
 
-Signal: 4 kHz pure-tone burst of duration T_b fed directly into
-PluginFastTimeWeighting and PluginSlowTimeWeighting (frequency weighting
-cancels in the differences).
+Signal: 4 kHz pure-tone burst of duration T_b fed through PluginAWeighting
+into PluginFastTimeWeighting and PluginSlowTimeWeighting.  Every result is
+expressed relative to the A-weighted steady-state level of the same tone, so
+the A-weighting gain cancels exactly in the differences (the weighting is kept
+in the chain for consistency with the other §5.x tests, not because it changes
+the reported deltas).
 
 Reference formulas (§5.9):
   δ_ref(F-max) = 10 · log₁₀(1 − exp(−T_b / τ))   τ = 0.125 s  (Formula 7)
@@ -14,13 +17,15 @@ the same sine signal), so frequency-weighting gain cancels exactly.  Table 4
 gives the three reference responses (F-max and SEL over 1000…0.25 ms; S-max
 over 1000…2 ms) each with their own class-1 acceptance limits.
 
-Notes on numerical exactness at 48 kHz / 4 kHz:
-  - One period = 12 samples; all Table 4 burst lengths are multiples of
-    12 samples, so ∑sin² over each burst equals n_burst/2 exactly.
+Notes on numerical behaviour at 48 kHz / 4 kHz:
+  - One period = 12 samples; all Table 4 burst lengths are whole numbers of
+    periods, so the unweighted burst energy would be exactly n_burst/2.
   - The discrete-time EMA converges analytically: y(n) = y_ss·(1−(1−α)^n)
     which equals y_ss·(1−exp(−T_b/τ)) to floating-point precision.
-  - Expected deviations from Table 4 rounded references: < 0.05 dB,
-    well within all class 1 limits.
+  - Deviations from the Table 4 rounded references are a few mdB for the
+    longer bursts, rising to ~0.15 dB for the shortest (sub-ms) bursts, whose
+    wide spectra sample the A-weighting across a band rather than at 4 kHz —
+    all well within the (widening) class 1 limits.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ import types
 import numpy as np
 import pytest
 
+from slm.frequency_weighting import PluginAWeighting
 from slm.time_weighting import PluginFastTimeWeighting, PluginSlowTimeWeighting
 
 
@@ -55,6 +61,25 @@ def _mock_bus(samplerate=48000, blocksize=4096, sensitivity=1.0, dt=1.0):
 # Measurement helper
 # ---------------------------------------------------------------------------
 
+def _a_weighted_steady_ms(amplitude: float, samplerate: int, blocksize: int) -> float:
+    """Steady-state time-weighted output (Pa²) of a *continuous* A-weighted 4 kHz
+    sine — the reference level L_A the toneburst deltas are measured against.
+
+    Measured through the same A-weighting as the burst, so the weighting gain
+    (|H_A(4 kHz)|²) cancels exactly in every delta.  The one-pole detector
+    converges to the true mean square, so this equals |H_A(4 kHz)|²·amplitude²/2
+    without any period-averaging error.
+    """
+    bus = _mock_bus(samplerate=samplerate, blocksize=blocksize)
+    w   = PluginAWeighting(input=bus)
+    f   = PluginFastTimeWeighting(input=w)          # subscribes to w
+    n_settle = max(1, int(np.ceil(2.0 * samplerate / blocksize)))   # 2 s >> τ_F
+    for i in range(n_settle):
+        t = (np.arange(blocksize) + i * blocksize) / samplerate
+        w.process((amplitude * np.sin(2.0 * np.pi * FREQ_HZ * t))[np.newaxis, :])
+    return float(f.output[0, -1])
+
+
 def _toneburst_response(
     burst_s: float,
     amplitude: float = 1.0,
@@ -67,15 +92,21 @@ def _toneburst_response(
     delta_SEL_dB  = SEL (dB) − steady-state level (dB)
     delta_Smax_dB = max S-time-weighted output (dB) − steady-state level (dB)
 
-    All differences are relative to the steady-state squared level
-    y_ss = amplitude² / 2, so any frequency-weighting gain cancels.
+    The signal is A-weighted before the F/S time weighting.  Because every delta
+    is taken relative to the A-weighted steady-state level y_ss (and the SEL uses
+    the A-weighted event energy), the A-weighting gain cancels: results match the
+    unweighted computation to a few mdB, growing to ~0.15 dB only on the shortest
+    (sub-ms) bursts, whose wide spectra sample the A-weighting across a band
+    rather than at 4 kHz alone.  All deviations stay well inside the class 1
+    limits, which widen to ±3 dB there.
     """
-    bus      = _mock_bus(samplerate=samplerate, blocksize=blocksize)
-    plugin_f = PluginFastTimeWeighting(input=bus)
-    plugin_s = PluginSlowTimeWeighting(input=bus)
+    bus       = _mock_bus(samplerate=samplerate, blocksize=blocksize)
+    weighting = PluginAWeighting(input=bus)
+    plugin_f  = PluginFastTimeWeighting(input=weighting)   # subscribe to weighting
+    plugin_s  = PluginSlowTimeWeighting(input=weighting)
 
-    # Steady-state time-weighted output for a sine of given amplitude.
-    y_ss = amplitude ** 2 / 2.0
+    # Steady-state A-weighted level of the same sine (see helper).
+    y_ss = _a_weighted_steady_ms(amplitude, samplerate, blocksize)
 
     n_burst = int(round(burst_s * samplerate))
     # Two seconds of silence after the burst to capture the full decay peak.
@@ -86,27 +117,31 @@ def _toneburst_response(
     burst_signal = amplitude * np.sin(2.0 * np.pi * FREQ_HZ * t_burst)
     full_signal  = np.concatenate([burst_signal, np.zeros(n_after)])
 
-    # Process in blocksize chunks; collect F- and S-time-weighted output.
-    f_chunks, s_chunks = [], []
+    # Process in blocksize chunks; weighting.process drives the F/S subscribers.
+    # Collect the A-weighted signal (for SEL) and both time-weighted outputs.
+    aw_chunks, f_chunks, s_chunks = [], [], []
     for start in range(0, n_total, blocksize):
         end   = min(start + blocksize, n_total)
         block = full_signal[start:end]
         if len(block) < blocksize:
             block = np.pad(block, (0, blocksize - len(block)))
-        plugin_f.process(block[np.newaxis, :])
-        plugin_s.process(block[np.newaxis, :])
+        weighting.process(block[np.newaxis, :])
+        aw_chunks.append(weighting.output[0, : end - start].copy())
         f_chunks.append(plugin_f.output[0, : end - start].copy())
         s_chunks.append(plugin_s.output[0, : end - start].copy())
-    f_output = np.concatenate(f_chunks)
-    s_output = np.concatenate(s_chunks)
+    aw_signal = np.concatenate(aw_chunks)
+    f_output  = np.concatenate(f_chunks)
+    s_output  = np.concatenate(s_chunks)
 
     # F-max / S-max: maximum of the time-weighted output over the whole window.
     delta_fmax = 10.0 * np.log10(float(np.max(f_output)) / y_ss)
     delta_smax = 10.0 * np.log10(float(np.max(s_output)) / y_ss)
 
-    # SEL: integrate burst signal squared — at 4 kHz / 48 kHz all burst lengths
-    # are multiples of one period (12 samples), so the sum is exactly n_burst/2.
-    e_burst    = float(np.sum(burst_signal ** 2)) / samplerate  # Pa² · s
+    # SEL: total A-weighted sound exposure = integral of the A-weighted signal
+    # squared over the whole event (burst + filter ring-down), not just the burst
+    # window — the A-weighting's group delay/ring-out carries part of the burst
+    # energy past n_burst.  Same weighting as y_ss, so the gain cancels.
+    e_burst    = float(np.sum(aw_signal ** 2)) / samplerate  # Pa² · s
     delta_sel  = 10.0 * np.log10(e_burst / (y_ss * T0))
 
     return delta_fmax, delta_sel, delta_smax
