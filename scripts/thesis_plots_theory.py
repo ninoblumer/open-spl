@@ -184,8 +184,10 @@ def make_fig_t2():
     w = 2.0 * np.pi * f / fs                       # rad/sample
 
     curves = {
-        "A": (C_BLUE, WeightingFilter(fs=fs, curve="A").sos),
-        "C": (C_RED,  WeightingFilter(fs=fs, curve="C").sos),
+        # high_accuracy=False matches the native-rate SOS the SLM actually applies
+        # (PluginFrequencyWeighting); PyOctaveBand >=2.0 otherwise returns a 2x-oversampled design.
+        "A": (C_BLUE, WeightingFilter(fs=fs, curve="A", high_accuracy=False).sos),
+        "C": (C_RED,  WeightingFilter(fs=fs, curve="C", high_accuracy=False).sos),
     }
 
     fig, (ax_gain, ax_gd) = plt.subplots(2, 1, figsize=(9, 7.5), sharex=True)

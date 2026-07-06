@@ -21,7 +21,7 @@ class PluginFrequencyWeighting(PluginMeter):
         self._compute_filter()
 
     def _compute_filter(self):
-        wf = WeightingFilter(fs=self.samplerate, curve=self.curve)
+        wf = WeightingFilter(fs=self.samplerate, curve=self.curve, high_accuracy=False)
         self._wf = wf.sos
         self._zi = sosfilt_zi(self._wf)  # avoids ringing of filter at the start.
         shape = self._zi.shape
