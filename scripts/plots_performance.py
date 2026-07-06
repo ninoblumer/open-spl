@@ -10,7 +10,7 @@ Two figures are produced:
                           colour encodes loadout, x-position encodes block size.
 
 Run from repository root:
-    python scripts/thesis_figures_performance.py [--data output/quick]
+    python scripts/plots_performance.py [--data output/quick]
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import matplotlib.ticker as ticker
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 
-# ── global style (matches thesis_plots_theory.py) ────────────────────────────
+# ── global style (matches plots_theory.py) ────────────────────────────
 plt.rcParams.update({
     "font.family":        "serif",
     "font.size":          10,
@@ -36,7 +36,7 @@ plt.rcParams.update({
     "figure.dpi":         150,
 })
 
-OUT = Path("thesis_figures")
+OUT = Path("plots")
 OUT.mkdir(exist_ok=True)
 
 
@@ -418,7 +418,7 @@ def main() -> None:
             print(f"  WARNING: skipped — {e}")
             traceback.print_exc()
 
-    print("\nDone. Figures saved to thesis_figures/")
+    print("\nDone. Figures saved to plots/")
 
 
 if __name__ == "__main__":

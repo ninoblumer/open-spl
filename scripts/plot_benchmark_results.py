@@ -6,7 +6,7 @@ subdirectories, each with quantity_a.csv and quantity_b.csv.
 
 Usage
 -----
-    python tests/benchmark/plot_benchmark_results.py [--data output/] [--save thesis_figures/]
+    python tests/benchmark/plot_benchmark_results.py [--data output/] [--save plots/]
 """
 from __future__ import annotations
 
@@ -326,8 +326,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory containing benchmark_48k/ and benchmark_96k/ subdirs.",
     )
     p.add_argument(
-        "--save", default="thesis_figures", metavar="DIR",
-        help="Directory to save PNG files (default: thesis_figures/).",
+        "--save", default="plots", metavar="DIR",
+        help="Directory to save PNG files (default: plots/).",
     )
     return p
 

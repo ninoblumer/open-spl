@@ -596,7 +596,7 @@ Options:
 After running the benchmark, produce publication-quality figures with:
 
 ```bash
-python scripts/thesis_figures_performance.py --data output/quick
+python scripts/plots_performance.py --data output/quick
 ```
 
 ---

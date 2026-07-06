@@ -8,7 +8,7 @@ dist/
 build/
 .coverage
 todo.md
-thesis_figures/**
+plots/**
 data/**/comparison_summary.csv
 scripts/export_slm02_nohpf.py
 /scripts/plot_slm01_calibrator_rta.py

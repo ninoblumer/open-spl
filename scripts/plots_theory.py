@@ -1,7 +1,7 @@
 """Publication-quality theory figures for thesis — signal illustrations.
 
 Run from repository root:
-    python scripts/thesis_plots_theory.py
+    python scripts/plots_theory.py
 """
 import sys
 import numpy as np
@@ -34,7 +34,7 @@ C_GREY  = "#555555"
 C_FILL  = "#d4d4d4"
 
 # ── output ────────────────────────────────────────────────────────────────────
-OUT = Path("thesis_figures")
+OUT = Path("plots")
 OUT.mkdir(exist_ok=True)
 
 
@@ -235,4 +235,4 @@ if __name__ == "__main__":
             save(fig, name)
         except Exception as e:
             print(f"  WARNING: skipped — {e}")
-    print("\nDone. Figures saved to thesis_figures/")
+    print("\nDone. Figures saved to plots/")

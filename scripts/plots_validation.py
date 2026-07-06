@@ -1,6 +1,6 @@
 """Publication-quality figures for the slm-test-02 XL2 validation set.
 
-Companion to ``thesis_plots_conformance.py`` (same visual style), but instead of
+Companion to ``plots_conformance.py`` (same visual style), but instead of
 the IEC reference-signal conformance tests this visualises the field validation
 against the NTi XL2 on the *slm-test-02* recordings.
 
@@ -27,7 +27,7 @@ The 94 dB / 1 kHz calibrator recording (SLM_000 / M00) still pins sensitivity bu
 is not plotted; only the four field recordings are shown.
 
 Run from repository root:
-    venv/Scripts/python scripts/thesis_plots_validation.py
+    venv/Scripts/python scripts/plots_validation.py
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ import matplotlib.ticker as ticker
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root
 
-# ── global style (matches thesis_plots_conformance.py) ────────────────────────
+# ── global style (matches plots_conformance.py) ────────────────────────
 plt.rcParams.update({
     "font.family":        "serif",
     "font.size":          10,
@@ -393,7 +393,7 @@ def xl2_rta_lzeq(rec: Recording) -> np.ndarray:
 USE_XL2_INPUT_FILTER = True
 
 # ── output ────────────────────────────────────────────────────────────────────
-OUT = Path("thesis_figures")
+OUT = Path("plots")
 OUT.mkdir(exist_ok=True)
 
 
@@ -795,7 +795,7 @@ def main() -> None:
             print(f"  WARNING: skipped — {e}")
             traceback.print_exc()
 
-    print("\nDone. Figures saved to thesis_figures/")
+    print("\nDone. Figures saved to plots/")
 
 
 if __name__ == "__main__":
