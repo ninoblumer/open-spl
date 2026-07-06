@@ -105,34 +105,6 @@ class TestPluginFrequencyWeightingBaseToStr:
 
 
 # ---------------------------------------------------------------------------
-# PluginHPF
-# ---------------------------------------------------------------------------
-
-class TestPluginHPF:
-
-    def _make_hpf(self):
-        from slm.frequency_weighting import PluginZWeighting, PluginHPF
-        engine = _make_engine()
-        bus = engine.add_bus("Z", PluginZWeighting)
-        fw = bus.frequency_weighting
-        plugin = PluginHPF(fc=5.0, order=1, input=fw)
-        bus.add_plugin(plugin)
-        return plugin
-
-    def test_to_str(self):
-        plugin = self._make_hpf()
-        assert "PluginHPF" in plugin.to_str()
-        assert "fc=5.0" in plugin.to_str()
-
-    def test_reset_clears_output(self):
-        plugin = self._make_hpf()
-        block = np.ones((1, BLOCKSIZE))
-        plugin.process(block)
-        plugin.reset()
-        np.testing.assert_array_equal(plugin.output, 0.0)
-
-
-# ---------------------------------------------------------------------------
 # PluginBandpass
 # ---------------------------------------------------------------------------
 

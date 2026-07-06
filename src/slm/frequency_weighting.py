@@ -76,36 +76,6 @@ class PluginZWeighting(PluginFrequencyWeighting):
         return "PluginZWeighting()"
 
 
-class PluginHPF(PluginMeter):
-    """Butterworth high-pass filter with parametrized cutoff and order."""
-
-    def __init__(self, *, fc: float, order: int = 1, zero_zi: bool = True, **kwargs):
-        super().__init__(**kwargs)
-        self.fc = fc
-        self.order = order
-        self.output = np.zeros((1, self.blocksize))
-        self._zero_zi = zero_zi
-        self._compute_filter()
-
-    def reset(self):
-        super().reset()
-        self._compute_filter()
-
-    def _compute_filter(self):
-        self._sos = butter(self.order, self.fc, btype='high', fs=self.samplerate, output='sos')
-        self._zi = sosfilt_zi(self._sos)
-        shape = self._zi.shape
-        self._zi = np.reshape(self._zi, (shape[0], 1, shape[1]))
-        if self._zero_zi:
-            self._zi = np.zeros_like(self._zi)
-
-    def func(self, block: np.ndarray):
-        self.output[0, :], self._zi[:, :] = sosfilt(self._sos, block, zi=self._zi)
-
-    def to_str(self):
-        return f"PluginHPF(fc={self.fc}, order={self.order})"
-
-
 class PluginBandpass(PluginMeter):
     """Narrow Butterworth bandpass filter (1/3-octave bandwidth around fc)."""
 
