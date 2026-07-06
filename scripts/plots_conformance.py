@@ -909,6 +909,13 @@ def make_fig_4_6b():
     # Compare the octave-band and one-third-octave-band filters, both centred at
     # 1 kHz.  A single Ω range (G⁻² … G²) is shown — the response is smooth, so a
     # separate passband zoom adds nothing.
+    #
+    # Both curves are plotted against the OCTAVE-band breakpoint coordinate
+    # x = G^e (as in fig 4.6): for the octave filter x = f/f_m, while the
+    # 1/3-octave physical frequency is the Formula (9)/(10) remap
+    # f = _omega_for_bandwidth(x, b)·f_m.  In this bandwidth-normalized coordinate
+    # both filters' band edges land at G^±0.5, so their phase/group-delay features
+    # align (the group-delay magnitude still differs — a narrower band delays more).
     def _band_at_1k(cfg=None):
         centers, sos_list = _filterbank() if cfg is None else _filterbank(cfg)
         i = int(np.argmin([abs(c - 1000) for c in centers]))
@@ -917,17 +924,18 @@ def make_fig_4_6b():
     sos_oct, f_m = _band_at_1k()                 # octave (1/1) bank, 1 kHz band
     sos_t3,  _   = _band_at_1k(THIRD_OCTAVE)     # one-third-octave bank, 1 kHz band
 
-    def _phase_and_gd(sos):
-        freqs_hz = np.clip(np.geomspace(f_m * G_IEC**(-2), f_m * G_IEC**(2), 2000),
-                           1.0, SAMPLERATE / 2 * 0.999)
+    def _phase_and_gd(sos, b):
+        x        = np.geomspace(G_IEC**(-2), G_IEC**(2), 2000)   # display coord
+        omega    = np.array([_omega_for_bandwidth(xi, b) for xi in x])
+        freqs_hz = np.clip(omega * f_m, 1.0, SAMPLERATE / 2 * 0.999)
         _, h = sig.sosfreqz(sos, worN=freqs_hz, fs=SAMPLERATE)
         phase   = np.unwrap(np.angle(h))
         w       = 2.0 * np.pi * freqs_hz / SAMPLERATE   # rad/sample
         gd_samp = -np.gradient(phase, w)                 # samples
-        return freqs_hz / f_m, phase * 180.0 / np.pi, gd_samp / SAMPLERATE * 1000.0
+        return x, phase * 180.0 / np.pi, gd_samp / SAMPLERATE * 1000.0
 
-    omega, phase_oct, gd_oct = _phase_and_gd(sos_oct)
-    _,     phase_t3,  gd_t3  = _phase_and_gd(sos_t3)
+    omega, phase_oct, gd_oct = _phase_and_gd(sos_oct, 1)
+    _,     phase_t3,  gd_t3  = _phase_and_gd(sos_t3, THIRD_OCTAVE.b)
 
     g_ticks = [G_IEC**k for k in range(-2, 3)]
     g_lbls  = ["G⁻²", "G⁻¹", "1", "G¹", "G²"]
