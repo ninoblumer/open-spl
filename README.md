@@ -1,6 +1,6 @@
 # soundlevelmeter
 
-An IEC 61672-1 compliant Sound Level Meter (SLM) in Python. Measures LAeq, LCeq, LZeq,
+An IEC 61672-1 and IEC 61260-1 compliant Sound Level Meter (SLM) in Python. Measures LAeq, LCeq, LZeq,
 LASmax, LAFmax, octave-band levels (1/1, 1/3, 1/6, …), sound exposure levels (LE), and more —
 from WAV files or a live microphone.
 

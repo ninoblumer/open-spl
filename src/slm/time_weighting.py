@@ -10,9 +10,8 @@ from slm.plugin_meter import PluginMeter
 class PluginTimeWeighting(PluginMeter, ABC):
     time_constant: str
 
-    def __init__(self, zero_zi: bool = True, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._zero_zi = zero_zi
         self.output = np.zeros((self.width, self.blocksize))
 
     @abstractmethod
@@ -38,9 +37,7 @@ class PluginSymmetricTimeWeighting(PluginTimeWeighting):
 
     def _compute_filter(self):
         self._alpha = float(1 - np.exp(-1 / (self.tau * self.samplerate)))
-        # Steady-state initial condition for unit input is 1.0; zeros if zero_zi.
-        init = 0.0 if self._zero_zi else 1.0
-        self._zi = np.full(self.width, init, dtype=np.float64)
+        self._zi = np.zeros(self.width, dtype=np.float64)
 
     def func(self, block: np.ndarray):
         _symmetric_time_weighting(block, self._zi, self._alpha, self.output)

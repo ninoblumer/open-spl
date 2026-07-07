@@ -198,7 +198,7 @@ def _metering_source(bus):
     if not USE_XL2_INPUT_FILTER:
         return bus.frequency_weighting
     return bus.add_plugin(PluginXL2InputFilter(
-        input=bus.frequency_weighting, zero_zi=True,
+        input=bus.frequency_weighting,
     ))
 
 
@@ -224,7 +224,7 @@ def compute_broadband(rec: Recording, blocksize: int = 1024,
         fw = _metering_source(bus)
 
         # eq / peak from the squared (Pa²) pressure.
-        sq = bus.add_plugin(PluginSquare(input=fw, zero_zi=True))
+        sq = bus.add_plugin(PluginSquare(input=fw))
         sq.create_meter(LeqAccumulator, name="eq")
         sq.create_meter(MaxAccumulator, name="peak")
         warmup_meters.append(sq.meters["peak"])   # filter startup overshoots the peak
@@ -232,7 +232,7 @@ def compute_broadband(rec: Recording, blocksize: int = 1024,
 
         # max / min for each time weighting (S/F/I).
         for tw in ("S", "F", "I"):
-            twp = bus.add_plugin(_TW_CLS[tw](input=fw, zero_zi=True))
+            twp = bus.add_plugin(_TW_CLS[tw](input=fw))
             twp.create_meter(MaxAccumulator, name="max")
             twp.create_meter(MinAccumulator, name="min")
             warmup_meters += [twp.meters["max"], twp.meters["min"]]
@@ -275,13 +275,13 @@ def compute_interval_metrics(rec: Recording, w_cls, dt: float = 1.0,
     bus = engine.add_bus("bus", w_cls)
     fw = _metering_source(bus)
 
-    sq = bus.add_plugin(PluginSquare(input=fw, zero_zi=True))
+    sq = bus.add_plugin(PluginSquare(input=fw))
     sq.create_meter(LeqAccumulator, name="eq")
     sq.create_meter(MaxAccumulator, name="peak")
-    fast = bus.add_plugin(PluginFastTimeWeighting(input=fw, zero_zi=True))
+    fast = bus.add_plugin(PluginFastTimeWeighting(input=fw))
     fast.create_meter(MaxAccumulator, name="max")
     fast.create_meter(MinAccumulator, name="min")
-    slow = bus.add_plugin(PluginSlowTimeWeighting(input=fw, zero_zi=True))
+    slow = bus.add_plugin(PluginSlowTimeWeighting(input=fw))
     slow.create_meter(MaxAccumulator, name="max")
     slow.create_meter(MinAccumulator, name="min")
 
@@ -318,7 +318,7 @@ def compute_moving_leq(rec: Recording, w_cls, windows=(5, 10, 15),
     controller = _controller(rec, blocksize)
     engine = Engine(controller, dt=1e9)
     bus = engine.add_bus("bus", w_cls)
-    sq = bus.add_plugin(PluginSquare(input=_metering_source(bus), zero_zi=True))
+    sq = bus.add_plugin(PluginSquare(input=_metering_source(bus)))
     for w in windows:
         sq.create_meter(LeqMovingMeter, name=f"m{w}", t=float(w))
 
@@ -348,7 +348,7 @@ def compute_octave_lzeq(rec: Recording, blocksize: int = 1024) -> tuple[np.ndarr
     # inside the filter passband (4.4 Hz–23 kHz).
     octave = bus.add_plugin(PluginOctaveBand(
         limits=(6.3, 20000), bands_per_oct=3.0,
-        input=bus.frequency_weighting, zero_zi=True,
+        input=bus.frequency_weighting,
     ))
     sum_sq = np.zeros(octave.n_bands, dtype=np.float64)
     n = 0

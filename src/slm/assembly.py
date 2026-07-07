@@ -479,12 +479,11 @@ def build_chain(
         elif node.kind == "band":
             plugin = PluginOctaveBand(
                 input=pred, limits=node.bands, bands_per_oct=node.bands_per_oct,
-                zero_zi=True,
             )
             bus.add_plugin(plugin)
         elif node.kind == "time_weighting":
             plugin = _tw_cls[node.time_weighting](
-                input=pred, zero_zi=True, width=pred.width,
+                input=pred, width=pred.width,
             )
             bus.add_plugin(plugin)
         elif node.kind == "square":

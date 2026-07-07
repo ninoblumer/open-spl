@@ -43,14 +43,14 @@ class Bus(ProcessingElement):
         # weighting reads the raw bus block directly.
         if input_filter is not None:
             self.input_filter = self.add_plugin(
-                input_filter(width=1, input=self, bus=self, zero_zi=True))
+                input_filter(width=1, input=self, bus=self))
             weighting_input = self.input_filter
         else:
             self.input_filter = None
             weighting_input = self
 
         self.frequency_weighting = self.add_plugin(
-            frequency_weighting(width=1, input=weighting_input, bus=self, zero_zi=True))
+            frequency_weighting(width=1, input=weighting_input, bus=self))
 
     def process(self, block: np.ndarray):
         # Drive the chain from its head: the input filter (if any) pushes its

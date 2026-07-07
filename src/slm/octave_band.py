@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 from numba import njit, prange
-from scipy import signal as sig
 
 from phonometry import OctaveFilterBank
 
@@ -16,9 +15,8 @@ class PluginOctaveBand(PluginMeter):
     _filter_bank: OctaveFilterBank
 
     def __init__(self, limits: tuple[float, float], bands_per_oct: float = 1.0, order: int = 6,
-                 filter_type: str = "butter", ripple: float=0.1, attenuation: float=60, zero_zi: bool = True, **kwargs):
+                 filter_type: str = "butter", ripple: float=0.1, attenuation: float=60, **kwargs):
         super().__init__(**kwargs)
-        self._zero_zi = zero_zi
 
         if self.input.width != 1:
             raise ValueError("OctaveBandPlugin only supports inputs of width=1")
@@ -26,7 +24,7 @@ class PluginOctaveBand(PluginMeter):
         self._filter_bank = OctaveFilterBank(fs=self.samplerate, fraction=bands_per_oct, limits=list(limits),
                                              show=False, order=order, filter_type=filter_type,
                                              ripple=ripple, attenuation=attenuation,
-                                             stateful=True, steady_ic=not zero_zi, resample=False)
+                                             stateful=True, steady_ic=False, resample=False)
 
         self._width = self.n_bands
         self.output = np.zeros((self.n_bands, self.blocksize))
@@ -34,28 +32,16 @@ class PluginOctaveBand(PluginMeter):
         # Stack SOS coefficients into a single contiguous array: [n_bands, n_sections, 6]
         self._sos_stack = np.ascontiguousarray(self._filter_bank.sos, dtype=np.float64)
 
-        # Stacked filter states: [n_bands, n_sections, 2]
+        # Stacked filter states (zero initial condition): [n_bands, n_sections, 2]
         n_sections = self._sos_stack.shape[1]
-        if zero_zi:
-            self._zi_stack = np.zeros((self.n_bands, n_sections, 2), dtype=np.float64)
-        else:
-            self._zi_stack = np.ascontiguousarray(
-                [sig.sosfilt_zi(self._filter_bank.sos[i]) for i in range(self.n_bands)],
-                dtype=np.float64,
-            )
+        self._zi_stack = np.zeros((self.n_bands, n_sections, 2), dtype=np.float64)
 
         # Force JIT compilation now, before any real audio arrives.
         # cache=True on the function means subsequent process starts skip this.
         _sosfilt_all_bands(self._sos_stack, np.zeros(self.blocksize, dtype=np.float64),
                            self._zi_stack, self.output)
         # Reset state and output dirtied by the warmup call
-        if zero_zi:
-            self._zi_stack[:] = 0.0
-        else:
-            self._zi_stack[:] = np.ascontiguousarray(
-                [sig.sosfilt_zi(self._filter_bank.sos[i]) for i in range(self.n_bands)],
-                dtype=np.float64,
-            )
+        self._zi_stack[:] = 0.0
         self.output[:] = 0.0
 
     def func(self, block: np.ndarray):
