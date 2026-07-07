@@ -11,7 +11,7 @@ import matplotlib.patches as mpatches
 from pathlib import Path
 
 from scipy import signal as sig
-from pyoctaveband import WeightingFilter
+from phonometry import WeightingFilter
 
 # ── global style ─────────────────────────────────────────────────────────────
 plt.rcParams.update({
@@ -175,7 +175,7 @@ def make_fig_t2():
 
     Top panel: magnitude response (dB). Bottom panel: group delay (ms), computed
     as -dφ/dω from the unwrapped phase. Both weightings are the digital SOS filters
-    used by the SLM (``pyoctaveband.WeightingFilter`` at fs = 48 kHz), so the
+    used by the SLM (``phonometry.WeightingFilter`` at fs = 48 kHz), so the
     group delay is that of the causal IIR implementation — large near the
     low-frequency high-pass corner, essentially flat above a few hundred Hz.
     """
@@ -185,7 +185,7 @@ def make_fig_t2():
 
     curves = {
         # high_accuracy=False matches the native-rate SOS the SLM actually applies
-        # (PluginFrequencyWeighting); PyOctaveBand >=2.0 otherwise returns a 2x-oversampled design.
+        # (PluginFrequencyWeighting); phonometry otherwise returns a 2x-oversampled design.
         "A": (C_BLUE, WeightingFilter(fs=fs, curve="A", high_accuracy=False).sos),
         "C": (C_RED,  WeightingFilter(fs=fs, curve="C", high_accuracy=False).sos),
     }

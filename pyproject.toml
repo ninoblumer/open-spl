@@ -7,7 +7,7 @@ name = "soundlevelmeter"
 version = "0.3.0"
 description = "IEC 61672-1 Sound Level Meter"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = { file = "LICENSE" }
 authors = [{ name = "Nino Blumer" }]
 keywords = ["sound level meter", "acoustics", "IEC 61672", "audio", "measurement"]
@@ -17,7 +17,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
 ]
@@ -26,7 +26,7 @@ dependencies = [
     "scipy",
     "soundfile",
     "sounddevice",
-    "pyoctaveband",
+    "phonometry",
     "numba",
 ]
 

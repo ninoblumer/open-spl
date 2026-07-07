@@ -115,10 +115,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-pyoctaveband
-------------
+phonometry
+----------
 Copyright (c) Jose Manuel Requena Plens <jmrplens@gmail.com>
-https://github.com/jmrplens/PyOctaveBand
+https://github.com/jmrplens/phonometry
 
-Licensed under the GNU General Public License v3.0.
-Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+Licensed under the MIT License.
+Full license text: https://opensource.org/license/mit

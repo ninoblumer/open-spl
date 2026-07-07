@@ -4,7 +4,7 @@ import numpy as np
 from numba import njit, prange
 from scipy import signal as sig
 
-from pyoctaveband import OctaveFilterBank
+from phonometry import OctaveFilterBank
 
 from slm.plugin_meter import PluginMeter
 
