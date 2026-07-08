@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
+from slm.io.results import MeasurementResults
+
 if TYPE_CHECKING:
     from slm.plugin_meter import PluginMeter
 
@@ -100,6 +102,40 @@ class Reporter:
                 print(f"{ts_str}  {label}: {arr_str}")
 
         self._last_log = timestamp
+
+    def results(self) -> MeasurementResults:
+        """Return the accumulated rows as an in-memory :class:`MeasurementResults`.
+
+        Timestamps are converted from ``timedelta`` to float seconds.  Broadband
+        and band-split (RTA) rows map to ``report``/``log`` and
+        ``rta_report``/``rta_log`` respectively; empty categories yield empty
+        containers.
+        """
+        def _row_seconds(row: dict) -> dict:
+            return {
+                k: (v.total_seconds() if isinstance(v, timedelta) else v)
+                for k, v in row.items()
+            }
+
+        log = [_row_seconds(row) for row in self._broadband_rows]
+        report = {k: v for k, v in log[-1].items() if k != "timestamp"} if log else {}
+
+        rta_log = [_row_seconds(row) for row in self._band_rows]
+        rta_report = (
+            {k: v for k, v in rta_log[-1].items() if k != "timestamp"}
+            if rta_log else {}
+        )
+        band_frequencies = {
+            label: list(freqs) for label, _, _, freqs in self._band_columns
+        }
+
+        return MeasurementResults(
+            report=report,
+            log=log,
+            rta_report=rta_report,
+            rta_log=rta_log,
+            band_frequencies=band_frequencies,
+        )
 
     def write(self, path: str | Path) -> None:
         """Write _log.csv, _report.csv, and optionally _rta_log.csv, _rta_report.csv."""

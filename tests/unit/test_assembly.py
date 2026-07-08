@@ -10,7 +10,7 @@ import soundfile as sf
 
 from slm.assembly import MetricSpec, parse_metric, build_chain, assemble_engine
 from slm.engine import Engine
-from slm.io.file_controller import FileController
+from slm.io.array_controller import ArrayController
 from slm.meter import (
     LeqAccumulator, LeqMovingMeter, MaxAccumulator, MinAccumulator,
     LEAccumulator, LEMovingMeter, LastAccumulatingMeter,
@@ -24,21 +24,18 @@ from slm.io.reporter import Reporter
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _write_sine(path: Path, freq: float = 1000.0, duration: float = 1.0,
-                samplerate: int = 48000, amplitude: float = 0.5) -> None:
+def _sine(freq: float = 1000.0, duration: float = 1.0,
+          samplerate: int = 48000, amplitude: float = 0.5) -> np.ndarray:
     t = np.arange(int(duration * samplerate)) / samplerate
-    signal = (amplitude * np.sin(2 * np.pi * freq * t)).astype(np.float32)
-    sf.write(str(path), signal, samplerate)
+    return (amplitude * np.sin(2 * np.pi * freq * t)).astype(np.float32)
 
 
-def _run_chain(tmp_path: Path, metric_names: list[str],
+def _run_chain(metric_names: list[str],
                amplitude: float = 0.5, sensitivity_v: float = 1.0,
                dt: float = 10.0, blocksize: int = 1024) -> tuple[Engine, Reporter]:
-    """Write a 1 kHz sine, build chain, run, return engine and reporter."""
-    wav = tmp_path / "sine.wav"
-    _write_sine(wav, amplitude=amplitude)
-
-    controller = FileController(str(wav), blocksize=blocksize)
+    """Feed a 1 kHz sine, build chain, run, return engine and reporter."""
+    controller = ArrayController(_sine(amplitude=amplitude), samplerate=48000,
+                                 blocksize=blocksize)
     controller.set_sensitivity(sensitivity_v, unit="V")
 
     specs = [parse_metric(n) for n in metric_names]
@@ -179,33 +176,31 @@ class TestSignalConditioning:
     """The optional bus input filter (signal conditioning) sits in front of the
     frequency weighting on every bus."""
 
-    def _engine(self, tmp_path, metrics, input_filter):
-        wav = tmp_path / "sine.wav"
-        _write_sine(wav)
-        controller = FileController(str(wav), blocksize=1024)
+    def _engine(self, metrics, input_filter):
+        controller = ArrayController(_sine(), samplerate=48000, blocksize=1024)
         controller.set_sensitivity(1.0, unit="V")
         specs = [parse_metric(n) for n in metrics]
         engine, _ = assemble_engine(specs, controller, dt=10.0, input_filter=input_filter)
         return engine
 
-    def test_no_input_filter_by_default(self, tmp_path):
-        engine = self._engine(tmp_path, ["LAeq", "LCeq"], input_filter=None)
+    def test_no_input_filter_by_default(self):
+        engine = self._engine(["LAeq", "LCeq"], input_filter=None)
         for bus in engine._busses.values():
             assert bus.input_filter is None
             assert bus.frequency_weighting.input is bus   # weighting reads the raw bus
 
-    def test_input_filter_inserted_in_front_of_weighting(self, tmp_path):
+    def test_input_filter_inserted_in_front_of_weighting(self):
         from slm.frequency_weighting import PluginXL2InputFilter
-        engine = self._engine(tmp_path, ["LAeq", "LZeq"], input_filter=PluginXL2InputFilter)
+        engine = self._engine(["LAeq", "LZeq"], input_filter=PluginXL2InputFilter)
         assert set(engine._busses.keys()) == {"A", "Z"}
         for bus in engine._busses.values():
             assert isinstance(bus.input_filter, PluginXL2InputFilter)
             assert bus.input_filter.input is bus                    # filter reads the raw bus
             assert bus.frequency_weighting.input is bus.input_filter  # weighting reads the filter
 
-    def test_conditioned_run_produces_finite_output(self, tmp_path):
+    def test_conditioned_run_produces_finite_output(self):
         from slm.frequency_weighting import PluginXL2InputFilter
-        engine = self._engine(tmp_path, ["LAeq"], input_filter=PluginXL2InputFilter)
+        engine = self._engine(["LAeq"], input_filter=PluginXL2InputFilter)
         engine.run()
         bus = engine._busses["A"]
         sq = next(p for p in bus.plugins if isinstance(p, PluginSquare))
@@ -214,19 +209,19 @@ class TestSignalConditioning:
 
 class TestBuildChainStructure:
 
-    def test_shared_bus_for_same_weighting(self, tmp_path):
+    def test_shared_bus_for_same_weighting(self):
         """LAeq + LAFmax → exactly one Bus named 'A'."""
-        engine, _ = _run_chain(tmp_path, ["LAeq", "LAFmax"])
+        engine, _ = _run_chain(["LAeq", "LAFmax"])
         assert list(engine._busses.keys()) == ["A"]
 
-    def test_two_metrics_two_buses(self, tmp_path):
+    def test_two_metrics_two_buses(self):
         """LAeq + LCeq → two buses ('A' and 'C')."""
-        engine, _ = _run_chain(tmp_path, ["LAeq", "LCeq"])
+        engine, _ = _run_chain(["LAeq", "LCeq"])
         assert set(engine._busses.keys()) == {"A", "C"}
 
-    def test_leq_and_leq_dt_share_freq_weighting(self, tmp_path):
+    def test_leq_and_leq_dt_share_freq_weighting(self):
         """LAeq + LAeq_dt → both meters share one PluginSquare on the A bus."""
-        engine, _ = _run_chain(tmp_path, ["LAeq", "LAeq_dt"])
+        engine, _ = _run_chain(["LAeq", "LAeq_dt"])
         bus = engine._busses["A"]
         freq_w = bus.frequency_weighting
         # The only extra plugin is the shared PluginSquare; both meters live on it.
@@ -238,18 +233,18 @@ class TestBuildChainStructure:
         assert isinstance(sq.meters["LAeq"], LeqAccumulator)
         assert isinstance(sq.meters["LAeq_dt"], LeqMovingMeter)
 
-    def test_time_weighting_plugin_created_for_max(self, tmp_path):
+    def test_time_weighting_plugin_created_for_max(self):
         """LAFmax → one time-weighting plugin on the A bus."""
-        engine, _ = _run_chain(tmp_path, ["LAFmax"])
+        engine, _ = _run_chain(["LAFmax"])
         bus = engine._busses["A"]
         non_fw = [p for p in bus.plugins if p is not bus.frequency_weighting]
         assert len(non_fw) == 1
         assert "LAFmax" in non_fw[0].meters
         assert isinstance(non_fw[0].meters["LAFmax"], MaxAccumulator)
 
-    def test_shared_time_weighting_plugin(self, tmp_path):
+    def test_shared_time_weighting_plugin(self):
         """LAFmax + LAFmin → same F time-weighting plugin, two meters."""
-        engine, _ = _run_chain(tmp_path, ["LAFmax", "LAFmin"])
+        engine, _ = _run_chain(["LAFmax", "LAFmin"])
         bus = engine._busses["A"]
         non_fw = [p for p in bus.plugins if p is not bus.frequency_weighting]
         assert len(non_fw) == 1
@@ -257,32 +252,32 @@ class TestBuildChainStructure:
         assert "LAFmax" in tw.meters
         assert "LAFmin" in tw.meters
 
-    def test_octave_band_plugin_created(self, tmp_path):
+    def test_octave_band_plugin_created(self):
         """LZeq:bands:63-8000 → one PluginOctaveBand on the Z bus."""
-        engine, _ = _run_chain(tmp_path, ["LZeq:bands:63-8000"])
+        engine, _ = _run_chain(["LZeq:bands:63-8000"])
         bus = engine._busses["Z"]
         obs = [p for p in bus.plugins if isinstance(p, PluginOctaveBand)]
         assert len(obs) == 1
 
-    def test_octave_band_width_equals_n_bands(self, tmp_path):
+    def test_octave_band_width_equals_n_bands(self):
         """PluginOctaveBand.width must equal n_bands (set in __init__, not patched)."""
-        engine, _ = _run_chain(tmp_path, ["LZeq:bands:63-8000"])
+        engine, _ = _run_chain(["LZeq:bands:63-8000"])
         bus = engine._busses["Z"]
         ob = next(p for p in bus.plugins if isinstance(p, PluginOctaveBand))
         assert ob.width == ob.n_bands
         assert ob.width > 1
 
-    def test_octave_band_goes_to_rta_reporter(self, tmp_path):
+    def test_octave_band_goes_to_rta_reporter(self):
         """LZeq:bands:63-8000 → reporter band_columns, not broadband_columns."""
-        _, reporter = _run_chain(tmp_path, ["LZeq:bands:63-8000"])
+        _, reporter = _run_chain(["LZeq:bands:63-8000"])
         assert len(reporter._band_columns) == 1
         assert len(reporter._broadband_columns) == 0
 
-    def test_shared_octave_band_plugin(self, tmp_path):
+    def test_shared_octave_band_plugin(self):
         """Two metrics with same bands → single PluginOctaveBand, two meters."""
         # We need two band metrics on the same weighting/limits/bpo.
         # LAeq_dt:bands:63-8000 and LAeq:bands:63-8000 share the OB plugin.
-        engine, _ = _run_chain(tmp_path, ["LAeq:bands:63-8000", "LAeq_dt:bands:63-8000"])
+        engine, _ = _run_chain(["LAeq:bands:63-8000", "LAeq_dt:bands:63-8000"])
         bus = engine._busses["A"]
         obs = [p for p in bus.plugins if isinstance(p, PluginOctaveBand)]
         assert len(obs) == 1
@@ -292,21 +287,21 @@ class TestBuildChainStructure:
         assert "LAeq:bands:63-8000" in sq.meters
         assert "LAeq_dt:bands:63-8000" in sq.meters
 
-    def test_reporter_broadband_columns_for_broadband_metrics(self, tmp_path):
+    def test_reporter_broadband_columns_for_broadband_metrics(self):
         """LAeq + LAFmax → two entries in broadband_columns."""
-        _, reporter = _run_chain(tmp_path, ["LAeq", "LAFmax"])
+        _, reporter = _run_chain(["LAeq", "LAFmax"])
         labels = [col[0] for col in reporter._broadband_columns]
         assert "LAeq" in labels
         assert "LAFmax" in labels
 
-    def test_run_produces_rows(self, tmp_path):
+    def test_run_produces_rows(self):
         """After engine.run(), reporter broadband_rows is non-empty."""
-        _, reporter = _run_chain(tmp_path, ["LAeq"], dt=0.5)
+        _, reporter = _run_chain(["LAeq"], dt=0.5)
         assert len(reporter._broadband_rows) >= 1
 
-    def test_lae_creates_le_accumulator_shares_bus(self, tmp_path):
+    def test_lae_creates_le_accumulator_shares_bus(self):
         """LAE creates LEAccumulator; shares A-bus freq-weighting with LAeq."""
-        engine, _ = _run_chain(tmp_path, ["LAeq", "LAE"])
+        engine, _ = _run_chain(["LAeq", "LAE"])
         bus = engine._busses["A"]
         freq_w = bus.frequency_weighting
         # LAeq + LAE share the single PluginSquare on the A bus.
@@ -317,23 +312,23 @@ class TestBuildChainStructure:
         assert isinstance(sq.meters["LAeq"], LeqAccumulator)
         assert isinstance(sq.meters["LAE"], LEAccumulator)
 
-    def test_lae_dt_creates_le_moving_meter(self, tmp_path):
+    def test_lae_dt_creates_le_moving_meter(self):
         """LAE_dt creates LEMovingMeter on freq-weighting plugin."""
-        engine, _ = _run_chain(tmp_path, ["LAE_dt"])
+        engine, _ = _run_chain(["LAE_dt"])
         bus = engine._busses["A"]
         sq = next(p for p in bus.plugins if isinstance(p, PluginSquare))
         assert isinstance(sq.meters["LAE_dt"], LEMovingMeter)
 
     # -- band + time-weighting chain (regression: previously NaN) -----------
 
-    def test_band_tw_chain_structure(self, tmp_path):
+    def test_band_tw_chain_structure(self):
         """LZF:bands:63-8000 → OctaveBand → FTW (not OctaveBand → LastMeter directly).
 
         Regression: before the fix, build_chain ignored time_weighting when
         bands was set, chaining OctaveBand directly to LastAccumulatingMeter.
         LastAccumulatingMeter then read raw linear Pa (signed) → log10(negative) = NaN.
         """
-        engine, _ = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        engine, _ = _run_chain(["LZF:bands:63-8000"])
         bus = engine._busses["Z"]
         freq_w = bus.frequency_weighting
         non_fw = [p for p in bus.plugins if p is not freq_w]
@@ -346,46 +341,46 @@ class TestBuildChainStructure:
         assert "LZF:bands:63-8000" in tw.meters
         assert isinstance(tw.meters["LZF:bands:63-8000"], LastAccumulatingMeter)
 
-    def test_band_tw_width_not_one(self, tmp_path):
+    def test_band_tw_width_not_one(self):
         """FTW plugin on band output must have width == n_bands, not 1.
 
         Regression: without explicit width= propagation, PluginFastTimeWeighting
         defaulted to width=1 and crashed with a broadcast error on the first block.
         """
-        engine, _ = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        engine, _ = _run_chain(["LZF:bands:63-8000"])
         bus = engine._busses["Z"]
         tw = next(p for p in bus.plugins if isinstance(p, PluginFastTimeWeighting))
         ob = next(p for p in bus.plugins if isinstance(p, PluginOctaveBand))
         assert tw.width == ob.n_bands
 
-    def test_band_tw_shared_plugin(self, tmp_path):
+    def test_band_tw_shared_plugin(self):
         """LZF:bands + LZFmax:bands same limits → one band-TW plugin, two meters."""
-        engine, _ = _run_chain(tmp_path, ["LZF:bands:63-8000", "LZFmax:bands:63-8000"])
+        engine, _ = _run_chain(["LZF:bands:63-8000", "LZFmax:bands:63-8000"])
         bus = engine._busses["Z"]
         ftw_plugins = [p for p in bus.plugins if isinstance(p, PluginFastTimeWeighting)]
         assert len(ftw_plugins) == 1
         assert "LZF:bands:63-8000" in ftw_plugins[0].meters
         assert "LZFmax:bands:63-8000" in ftw_plugins[0].meters
 
-    def test_band_tw_no_nan(self, tmp_path):
+    def test_band_tw_no_nan(self):
         """LZF:bands:63-8000 must not produce NaN — core regression check."""
-        _, reporter = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        _, reporter = _run_chain(["LZF:bands:63-8000"])
         _, plugin, meter_name, _ = reporter._band_columns[0]
         vals = plugin.read_db(meter_name)
         assert not np.any(np.isnan(vals)), f"NaN in LZF:bands output: {vals}"
 
-    def test_band_tw_some_bands_finite(self, tmp_path):
+    def test_band_tw_some_bands_finite(self):
         """At least one band has a finite level for a 1 kHz sine (1 kHz octave band)."""
-        _, reporter = _run_chain(tmp_path, ["LZF:bands:63-8000"])
+        _, reporter = _run_chain(["LZF:bands:63-8000"])
         _, plugin, meter_name, _ = reporter._band_columns[0]
         vals = plugin.read_db(meter_name)
         assert np.any(np.isfinite(vals)), f"No finite values in LZF:bands output: {vals}"
 
     # -- band + no-TW (PluginSquare) chain ----------------------------------
 
-    def test_band_sq_chain_structure(self, tmp_path):
+    def test_band_sq_chain_structure(self):
         """LZ:bands:63-8000 → OctaveBand → PluginSquare with correct width."""
-        engine, _ = _run_chain(tmp_path, ["LZ:bands:63-8000"])
+        engine, _ = _run_chain(["LZ:bands:63-8000"])
         bus = engine._busses["Z"]
         freq_w = bus.frequency_weighting
         non_fw = [p for p in bus.plugins if p is not freq_w]
@@ -398,18 +393,18 @@ class TestBuildChainStructure:
         assert "LZ:bands:63-8000" in sq.meters
         assert isinstance(sq.meters["LZ:bands:63-8000"], LastAccumulatingMeter)
 
-    def test_band_sq_no_nan(self, tmp_path):
+    def test_band_sq_no_nan(self):
         """LZ:bands:63-8000 must not produce NaN."""
-        _, reporter = _run_chain(tmp_path, ["LZ:bands:63-8000"])
+        _, reporter = _run_chain(["LZ:bands:63-8000"])
         _, plugin, meter_name, _ = reporter._band_columns[0]
         vals = plugin.read_db(meter_name)
         assert not np.any(np.isnan(vals)), f"NaN in LZ:bands output: {vals}"
 
     # -- broadband bare metric (PluginSquare) --------------------------------
 
-    def test_broadband_sq_chain_structure(self, tmp_path):
+    def test_broadband_sq_chain_structure(self):
         """LZ → PluginSquare on bus, LastAccumulatingMeter."""
-        engine, _ = _run_chain(tmp_path, ["LZ"])
+        engine, _ = _run_chain(["LZ"])
         bus = engine._busses["Z"]
         freq_w = bus.frequency_weighting
         non_fw = [p for p in bus.plugins if p is not freq_w]
@@ -420,9 +415,9 @@ class TestBuildChainStructure:
         assert "LZ" in sq.meters
         assert isinstance(sq.meters["LZ"], LastAccumulatingMeter)
 
-    def test_broadband_sq_no_nan(self, tmp_path):
+    def test_broadband_sq_no_nan(self):
         """LZ on a 1 kHz sine must not produce NaN (may be -inf at zero crossings)."""
-        _, reporter = _run_chain(tmp_path, ["LZ"])
+        _, reporter = _run_chain(["LZ"])
         _, plugin, meter_name = reporter._broadband_columns[0]
         val = plugin.read_db(meter_name)[0]
         assert not np.isnan(val)
@@ -545,11 +540,9 @@ def _collect_meters(engine) -> dict:
     return found
 
 
-def _build_only(tmp_path: Path, names: list[str]):
-    """Write a sine, build the chain (without running), return the engine."""
-    wav = tmp_path / "sine.wav"
-    _write_sine(wav)
-    controller = FileController(str(wav), blocksize=1024)
+def _build_only(names: list[str]):
+    """Feed a sine, build the chain (without running), return the engine."""
+    controller = ArrayController(_sine(), samplerate=48000, blocksize=1024)
     controller.set_sensitivity(1.0, unit="V")
     engine = Engine(controller, dt=10.0)
     build_chain([parse_metric(n) for n in names], engine)
@@ -601,12 +594,12 @@ class TestPlanChain:
         band_max = plan_chain(parse_metric("LZFmax:bands:63-8000")).nodes[1].key
         assert band_eq == band_max
 
-    def test_meter_class_name_matches_build_chain(self, tmp_path):
+    def test_meter_class_name_matches_build_chain(self):
         """Oracle: the IR's meter class equals what build_chain actually wires."""
         from slm.assembly import plan_chain, meter_class_name
         names = ["LAeq", "LAeq_dt", "LAeq_30s", "LAFmax", "LASmin",
                  "LAF", "LZeq:bands:63-8000", "LZFmax:bands:63-8000"]
-        engine = _build_only(tmp_path, names)
+        engine = _build_only(names)
         meters = _collect_meters(engine)
         for name in names:
             plan = plan_chain(parse_metric(name))
@@ -639,19 +632,18 @@ class TestPlanChain:
 # assemble_engine factory + on_record boundary
 # ---------------------------------------------------------------------------
 
-def _file_controller(tmp_path: Path, duration: float = 1.0):
-    wav = tmp_path / "sine.wav"
-    _write_sine(wav, duration=duration)
-    controller = FileController(str(wav), blocksize=1024)
+def _controller(duration: float = 1.0):
+    controller = ArrayController(_sine(duration=duration), samplerate=48000,
+                                 blocksize=1024)
     controller.set_sensitivity(1.0, unit="V")
     return controller
 
 
 class TestAssembleEngine:
 
-    def test_returns_engine_and_bindings(self, tmp_path):
+    def test_returns_engine_and_bindings(self):
         from slm.assembly import ColumnBinding
-        controller = _file_controller(tmp_path)
+        controller = _controller()
         specs = [parse_metric("LAeq"), parse_metric("LZeq:bands:63-8000")]
         engine, bindings = assemble_engine(specs, controller, dt=10.0)
         assert isinstance(engine, Engine)
@@ -661,9 +653,9 @@ class TestAssembleEngine:
         assert bindings[0].center_frequencies is None
         assert bindings[1].center_frequencies is not None
 
-    def test_on_record_default_is_noop(self, tmp_path):
+    def test_on_record_default_is_noop(self):
         """An engine with no sink attached runs and still updates its meters."""
-        controller = _file_controller(tmp_path)
+        controller = _controller()
         engine, _ = assemble_engine([parse_metric("LAeq")], controller, dt=10.0)
         engine.run()   # no on_record wired → must not raise
         bus = engine._busses["A"]
@@ -671,8 +663,8 @@ class TestAssembleEngine:
         val = sq.read_db("LAeq")
         assert np.isfinite(val)
 
-    def test_reporter_wiring_populates_rows(self, tmp_path):
-        controller = _file_controller(tmp_path)
+    def test_reporter_wiring_populates_rows(self):
+        controller = _controller()
         engine, bindings = assemble_engine([parse_metric("LAeq")], controller, dt=0.1)
         reporter = Reporter()
         reporter.add_columns(bindings)
@@ -681,8 +673,8 @@ class TestAssembleEngine:
         assert len(reporter._broadband_rows) >= 1
         assert np.isfinite(reporter._broadband_rows[-1]["LAeq"])
 
-    def test_on_record_ticks_each_block_then_final_snapshot(self, tmp_path):
-        controller = _file_controller(tmp_path, duration=0.5)
+    def test_on_record_ticks_each_block_then_final_snapshot(self):
+        controller = _controller(duration=0.5)
         engine, _ = assemble_engine([parse_metric("LAeq")], controller, dt=10.0)
         seen_dts: list[float] = []
         engine.on_record = lambda ts, dt: seen_dts.append(dt)

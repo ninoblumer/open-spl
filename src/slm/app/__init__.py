@@ -1,5 +1,6 @@
 """Public API for slm.app — configuration, CLI helpers, and measurement runners."""
 from slm.app.config import SLMConfig
+from slm.io.results import MeasurementResults
 from slm.app.cli import (
     SLMShell,
     sensitivity_from_fs_db,
@@ -16,6 +17,7 @@ from slm.app.cli import (
 
 __all__ = [
     "SLMConfig",
+    "MeasurementResults",
     "SLMShell",
     "sensitivity_from_fs_db",
     "sensitivity_from_mv",

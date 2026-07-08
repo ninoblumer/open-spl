@@ -290,7 +290,7 @@ Pass this via `--fs-db 128.1` or `--sensitivity-dbv`/`--sensitivity-mv` on the C
 ## Architecture
 
 ```
-Controller (FileController | SounddeviceController)
+Controller (FileController | ArrayController | SounddeviceController | NoiseController)
     │  reads audio blocks
     ▼
 Engine
@@ -354,6 +354,38 @@ run_measurement("recording.wav", sens, config, realtime=True, print_to_console=T
 # Live measurement from a microphone (runs until Ctrl+C)
 run_realtime_measurement(sens, config, device=0, samplerate=48_000, print_to_console=True)
 ```
+
+`run_measurement` also accepts an in-memory NumPy array instead of a path — pass the
+sample rate explicitly (there is no WAV header) and choose how results come back with
+`output=`: `"csv"` (default, writes the CSV files) or `"return"` (skip disk). It always
+returns a [`MeasurementResults`](#results) object:
+
+```python
+import numpy as np
+from slm import run_measurement          # also re-exported from slm.app
+from slm.app import SLMConfig
+
+fs = 48_000
+t = np.arange(fs) / fs
+samples = 0.1 * np.sin(2 * np.pi * 1000 * t)     # 1 s, 1 kHz tone (mono)
+
+config = SLMConfig(metrics=["LZeq", "LAeq"], dt=0.1)
+results = run_measurement(samples, sens, config, samplerate=fs, output="return")
+
+print(results.report)      # {'LZeq': ..., 'LAeq': ...}  — final values
+print(results.log[0])      # {'timestamp': 0.0, 'LZeq': ..., 'LAeq': ...}  — per-dt rows
+```
+
+<a name="results"></a>
+`MeasurementResults` (from `slm` / `slm.io` / `slm.app`) holds:
+
+| Field | Meaning |
+| --- | --- |
+| `report` | Final broadband value per metric label (last logged row). |
+| `log` | Per-`dt` broadband rows; each a dict of `timestamp` (float seconds) + labels. |
+| `rta_report` | Final band-split (octave/RTA) array per band-column label. |
+| `rta_log` | Per-`dt` band-split rows (`timestamp` + one array per label). |
+| `band_frequencies` | Band center-frequency labels (e.g. `"1k"`) per band-column label. |
 
 ### Mid-level (declarative)
 

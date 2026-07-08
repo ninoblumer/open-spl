@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+import numpy as np
+
 from slm.constants import CALIBRATION_FREQ_HZ, CALIBRATION_LEVEL_DB, REFERENCE_PRESSURE
 from slm.io.controller import Controller
 from slm.io.realtime_controller import DEFAULT_BLOCKSIZE, DEFAULT_SAMPLERATE
@@ -14,6 +16,7 @@ from slm.io.thread_priority import high_priority
 
 if TYPE_CHECKING:
     from slm.app.config import SLMConfig
+    from slm.io.results import MeasurementResults
 
 
 # ---------------------------------------------------------------------------
@@ -273,12 +276,17 @@ def _build_and_run_engine(
     print_to_console: bool = False,
     display_mode: str = "plain",
     duration: float | None = None,
-) -> None:
-    """Build and run the engine for *controller*; write results on exit.
+    write_output: bool = True,
+) -> "MeasurementResults":
+    """Build and run the engine for *controller*; return the measured results.
 
     Branch-free across source types: the controller's uniform interface handles
     start/stop (context manager), dropped-block counting (``overruns``), and live
     telemetry (``load_status``); file sources use the inert defaults.
+
+    When *write_output* is true, the CSV result files are written to
+    ``config.output`` on exit.  The in-memory :class:`MeasurementResults` is
+    returned regardless.
     """
     from slm.assembly import parse_metric, assemble_engine
     from slm.io.reporter import Reporter
@@ -306,7 +314,9 @@ def _build_and_run_engine(
         gc.enable()
         if controller.overruns:
             print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
-        reporter.write(config.output)
+        if write_output:
+            reporter.write(config.output)
+    return reporter.results()
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +324,7 @@ def _build_and_run_engine(
 # ---------------------------------------------------------------------------
 
 def run_measurement(
-    wav_path: str | Path,
+    source: "str | Path | np.ndarray",
     sensitivity_v: float,
     config: "SLMConfig",
     print_to_console: bool = False,
@@ -322,20 +332,47 @@ def run_measurement(
     display_mode: str = "plain",
     realtime: bool = False,
     duration: float | None = None,
-) -> None:
-    """Parse *config.metrics*, build the plugin chain, run the engine, write results.
+    samplerate: int | None = None,
+    output: str = "csv",
+) -> "MeasurementResults":
+    """Parse *config.metrics*, build the plugin chain, run the engine, return results.
+
+    *source* is either a path to a WAV file or an in-memory numpy array of samples.
+    For an array, *samplerate* is required (there is no WAV header); *realtime* is
+    ignored (an array is a fast pull source, like a file).
+
+    *output* selects how results are delivered:
+
+    * ``"csv"`` (default) — write the CSV result files to ``config.output``.
+    * ``"return"`` — skip disk entirely.
+
+    The :class:`~slm.io.results.MeasurementResults` is returned in both modes.
 
     *duration* (seconds), if given, stops the run after that much signal has been
-    processed (rounded up to the next whole block); otherwise the whole file is read.
+    processed (rounded up to the next whole block); otherwise the whole source is read.
     """
     if sensitivity_v <= 0:
         raise ValueError(f"sensitivity_v must be positive, got {sensitivity_v}")
-    from slm.io.file_controller import FileController
+    if output not in ("csv", "return"):
+        raise ValueError(f"output must be 'csv' or 'return', got {output!r}")
 
-    controller = FileController(str(wav_path), blocksize=blocksize, realtime=realtime)
+    if isinstance(source, np.ndarray):
+        if samplerate is None:
+            raise ValueError("samplerate is required when source is a numpy array")
+        from slm.io.array_controller import ArrayController
+        controller: Controller = ArrayController(
+            source, samplerate=samplerate, blocksize=blocksize
+        )
+    else:
+        from slm.io.file_controller import FileController
+        controller = FileController(str(source), blocksize=blocksize, realtime=realtime)
+
     controller.set_sensitivity(sensitivity_v, unit="V")
-    _build_and_run_engine(controller, config, print_to_console=print_to_console,
-                          display_mode=display_mode, duration=duration)
+    return _build_and_run_engine(
+        controller, config, print_to_console=print_to_console,
+        display_mode=display_mode, duration=duration,
+        write_output=(output == "csv"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +387,7 @@ def run_noise_measurement(
     print_to_console: bool = False,
     display_mode: str = "plain",
     duration: float | None = None,
-) -> None:
+) -> "MeasurementResults":
     """Run a measurement driven by white-noise input (no audio hardware required).
 
     Uses :class:`~slm.io.noise_controller.NoiseController` in real-time mode.
@@ -374,8 +411,8 @@ def run_noise_measurement(
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-    _build_and_run_engine(controller, config, print_to_console=print_to_console,
-                          display_mode=display_mode, duration=duration)
+    return _build_and_run_engine(controller, config, print_to_console=print_to_console,
+                                 display_mode=display_mode, duration=duration)
 
 
 def run_realtime_measurement(
@@ -387,7 +424,7 @@ def run_realtime_measurement(
     print_to_console: bool = False,
     display_mode: str = "plain",
     duration: float | None = None,
-) -> None:
+) -> "MeasurementResults":
     """Start a live measurement from a real-time audio input device.
 
     The engine runs until *duration* seconds have elapsed (rounded up to the next
@@ -409,8 +446,8 @@ def run_realtime_measurement(
         f"Block size: {blocksize}  |  "
         f"Queue max: {config.queue_maxsize} blocks"
     )
-    _build_and_run_engine(controller, config, print_to_console=print_to_console,
-                          display_mode=display_mode, duration=duration)
+    return _build_and_run_engine(controller, config, print_to_console=print_to_console,
+                                 display_mode=display_mode, duration=duration)
 
 
 # ---------------------------------------------------------------------------

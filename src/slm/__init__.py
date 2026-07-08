@@ -5,7 +5,9 @@ from slm.assembly import (
     NodeReq, MeterReq, ChainPlan, plan_chain,
 )
 from slm.frequency_weighting import PluginInputFilter, PluginXL2InputFilter
-from slm.app.cli import calibrate_from_file, calibrate_from_device
+from slm.io.array_controller import ArrayController
+from slm.io.results import MeasurementResults
+from slm.app.cli import calibrate_from_file, calibrate_from_device, run_measurement
 
 __all__ = [
     "Engine",
@@ -20,6 +22,9 @@ __all__ = [
     "plan_chain",
     "PluginInputFilter",
     "PluginXL2InputFilter",
+    "ArrayController",
+    "MeasurementResults",
     "calibrate_from_file",
     "calibrate_from_device",
+    "run_measurement",
 ]
