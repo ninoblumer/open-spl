@@ -390,10 +390,12 @@ print(results.log[0])      # {'timestamp': 0.0, 'LZeq': ..., 'LAeq': ...}  — p
 ### Mid-level (declarative)
 
 ```python
+import numpy as np
 from slm import assemble_engine, parse_metric
-from slm.io import FileController, Reporter
+from slm.io import ArrayController, Reporter
 
-controller = FileController("recording.wav", blocksize=1024)
+samples = np.asarray(...)             # any mono signal (synthesized or loaded)
+controller = ArrayController(samples, samplerate=48_000, blocksize=1024)
 controller.set_sensitivity(sens, unit="V")
 
 specs = [parse_metric(m) for m in ["LAeq", "LAFmax", "LZeq:bands:63-8000"]]
@@ -404,57 +406,26 @@ reporter.add_columns(bindings)        # what to read
 engine.on_record = reporter.record    # when to read
 
 engine.run()
-reporter.write("output/measurement")
+results = reporter.results()          # in-memory MeasurementResults
+reporter.write("output/measurement")  # — or — write CSV files
 ```
 
-Pass an `input_filter` to insert a signal-conditioning filter at the head of every bus, in
-front of the frequency weighting. Use the `PluginXL2InputFilter` preset, the generic
-`PluginInputFilter` (bind cutoffs/orders with `functools.partial`), or resolve a spec string
-with `resolve_signal_conditioning`:
+Swap `ArrayController` for `FileController("recording.wav", blocksize=1024)` to read from a
+WAV file instead; every downstream step is identical.
 
-```python
-from functools import partial
-from slm import assemble_engine, parse_metric, PluginInputFilter, PluginXL2InputFilter
-from slm.app import resolve_signal_conditioning
-
-specs = [parse_metric("LZeq")]
-
-# preset
-engine, _ = assemble_engine(specs, controller, dt=1.0, input_filter=PluginXL2InputFilter)
-
-# custom (23 kHz 4th-order LPF + 20 Hz 2nd-order HPF; order 0 disables a stage)
-custom = partial(PluginInputFilter, lpf_fc=23_000, lpf_order=4, hpf_fc=20, hpf_order=2)
-engine, _ = assemble_engine(specs, controller, dt=1.0, input_filter=custom)
-
-# — or — resolve the same string the CLI/config accepts ("xl2" or "F_HPF N_HPF F_LPF N_LPF")
-engine, _ = assemble_engine(specs, controller, dt=1.0,
-                            input_filter=resolve_signal_conditioning("20 2 23000 4"))
-```
-
-A metric name is parsed in two passes: `parse_metric` produces a `MetricSpec`
-(the parsed name), and `plan_chain` lowers that into a `ChainPlan` — a structural,
-engine-free description of the plugin/meter chain (a tuple of `NodeReq` ending in a
-`MeterReq`). `build_chain` and the REPL `tree`/`inspect` commands are both backends
-over this shared representation, so you can inspect how a metric will be wired
-without constructing an engine:
-
-```python
-from slm import parse_metric, plan_chain
-
-plan = plan_chain(parse_metric("LZFmax:bands:63-8000"))
-print([n.kind for n in plan.nodes])   # ['freq_weighting', 'band', 'time_weighting']
-```
 
 ### Low-level (manual)
 
 ```python
+import numpy as np
 from slm import Engine
-from slm.io import FileController, Reporter
+from slm.io import ArrayController, Reporter
 from slm.frequency_weighting import PluginAWeighting
 from slm.time_weighting import PluginFastTimeWeighting
 from slm.meter import LeqAccumulator, MaxAccumulator
 
-controller = FileController("recording.wav", blocksize=1024)
+samples = np.asarray(...)             # any mono signal (synthesized or loaded)
+controller = ArrayController(samples, samplerate=48_000, blocksize=1024)
 controller.set_sensitivity(sens, unit="V")
 engine = Engine(controller, dt=1.0)
 
