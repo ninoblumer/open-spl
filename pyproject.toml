@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "soundlevelmeter"
-version = "0.3.0"
+version = "1.0.0"
 description = "IEC 61672-1 Sound Level Meter"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Nino Blumer" }]
 keywords = ["sound level meter", "acoustics", "IEC 61672", "audio", "measurement"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
