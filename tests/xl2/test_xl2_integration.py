@@ -129,19 +129,22 @@ def comparison(request, tmp_path_factory):
     meas = XL2Measurement(name, data_dir=data_dir)
     tmp = tmp_path_factory.mktemp(f"{data_dir.name}_{key}")
 
+    # Both passes report at 2 dp (finer than the 0.1 dB product default) so the
+    # tight ±0.2 dB comparison tolerances are not eaten into by report rounding.
+
     # Broadband pass — with the XL2 analog input filter in the chain.
     bb_stem = str(tmp / "bb")
     run_measurement(
         str(meas.wav_path), meas.sensitivity,
         SLMConfig(metrics=list(EQ_METRICS + SEL_METRICS + SERIES_METRICS),
-                  dt=1.0, output=bb_stem, signal_conditioning="xl2"),
+                  dt=1.0, output=bb_stem, signal_conditioning="xl2", precision=2),
     )
 
     # RTA pass — unconditioned, band set matched to the XL2 RTA resolution.
     rta_stem = str(tmp / "rta")
     run_measurement(
         str(meas.wav_path), meas.sensitivity,
-        SLMConfig(metrics=[meas.rta_metric()], dt=1.0, output=rta_stem),
+        SLMConfig(metrics=[meas.rta_metric()], dt=1.0, output=rta_stem, precision=2),
     )
 
     return {

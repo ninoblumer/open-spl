@@ -284,6 +284,9 @@ def _build_and_run_engine(
     start/stop (context manager), dropped-block counting (``overruns``), and live
     telemetry (``load_status``); file sources use the inert defaults.
 
+    The console output and CSV result files are formatted to ``config.precision``
+    decimal places (default one, i.e. 0.1 dB resolution).
+
     When *write_output* is true, the CSV result files are written to
     ``config.output`` on exit.  The in-memory :class:`MeasurementResults` is
     returned regardless.
@@ -293,9 +296,10 @@ def _build_and_run_engine(
     from slm.io.display import make_display_fn
 
     specs = [parse_metric(m) for m in config.metrics]
+    precision = config.precision
     input_filter = resolve_signal_conditioning(config.signal_conditioning)
-    display_fn = make_display_fn(display_mode, precision=2, controller=controller) if print_to_console else None
-    reporter = Reporter(precision=2, print_to_console=print_to_console, display_fn=display_fn)
+    display_fn = make_display_fn(display_mode, precision=precision, controller=controller) if print_to_console else None
+    reporter = Reporter(precision=precision, print_to_console=print_to_console, display_fn=display_fn)
     engine, bindings = assemble_engine(specs, controller, dt=config.dt, input_filter=input_filter)
     reporter.add_columns(bindings)
     engine.on_record = reporter.record
@@ -316,7 +320,13 @@ def _build_and_run_engine(
             print(f"Warning: {controller.overruns} block(s) dropped (engine too slow).")
         if write_output:
             reporter.write(config.output)
-    return reporter.results()
+    results = reporter.results()
+    if print_to_console:
+        from slm.io.display import format_report
+        report_str = format_report(results, precision=precision)
+        if report_str:
+            print("\n" + report_str)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +356,8 @@ def run_measurement(
     * ``"csv"`` (default) — write the CSV result files to ``config.output``.
     * ``"return"`` — skip disk entirely.
 
-    The :class:`~slm.io.results.MeasurementResults` is returned in both modes.
+    The :class:`~slm.io.results.MeasurementResults` is returned in both modes.  The
+    report/CSV decimal places come from ``config.precision`` (default one, 0.1 dB).
 
     *duration* (seconds), if given, stops the run after that much signal has been
     processed (rounded up to the next whole block); otherwise the whole source is read.
@@ -458,8 +469,8 @@ class SLMShell(cmd.Cmd):
     """Interactive SLM REPL.
 
     Commands: add, remove, file, device, generator, sensitivity, calibrate,
-              output, name, warmup, conditioning, dt, queue, samplerate, blocksize,
-              show, save, load, start, display, realtime, tree, inspect,
+              output, name, warmup, conditioning, dt, precision, queue, samplerate,
+              blocksize, show, save, load, start, display, realtime, tree, inspect,
               exit/quit/EOF.
     """
 
@@ -802,6 +813,31 @@ the value set here.
         except ValueError:
             print(f"Invalid dt: {arg.strip()!r}")
 
+    def do_precision(self, arg: str) -> None:
+        """precision N — set the decimal places for reported/displayed levels.
+
+The default is 1 (0.1 dB resolution, matching a Class-1 SLM display).  Applies to
+both the scrolling console output and the CSV result files.
+
+Examples:
+  precision      show current setting
+  precision 1    0.1 dB resolution (default)
+  precision 2    0.01 dB resolution
+"""
+        arg = arg.strip()
+        if not arg:
+            print(f"  Precision: {self._config.precision} dp")
+            return
+        try:
+            n = int(arg)
+            if n < 0:
+                raise ValueError
+        except ValueError:
+            print(f"Invalid value: {arg!r}  (must be a non-negative integer)")
+            return
+        self._config.precision = n
+        print(f"  Precision: {n} dp")
+
     def do_queue(self, arg: str) -> None:
         """queue N — set the real-time block queue depth (default: 0 = unbounded).
 
@@ -890,6 +926,7 @@ Examples:
         print(f"  Source:      {source}")
         print(f"  Sensitivity: {'(not set)' if self._sensitivity_v is None else self._sensitivity_v}")
         print(f"  dt:          {self._config.dt} s")
+        print(f"  Precision:   {self._config.precision} dp")
         print(f"  Warm-up:     {self._config.warmup} s")
         print(f"  Conditioning:{' '}{self._config.signal_conditioning or 'none'}")
         print(f"  Sample rate: {self._samplerate} Hz")

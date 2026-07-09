@@ -101,6 +101,23 @@ class TestSLMConfigToml:
         with pytest.raises(ValueError, match="warmup must be non-negative"):
             SLMConfig.from_toml(toml_path)
 
+    def test_precision_round_trip(self, tmp_path):
+        config = SLMConfig(metrics=["LAeq"], precision=2)
+        toml_path = tmp_path / "config.toml"
+        config.to_toml(toml_path)
+        assert SLMConfig.from_toml(toml_path).precision == 2
+
+    def test_precision_defaults_to_one(self, tmp_path):
+        toml_path = tmp_path / "minimal.toml"
+        toml_path.write_text("[measurement]\n", encoding="utf-8")
+        assert SLMConfig.from_toml(toml_path).precision == 1
+
+    def test_negative_precision_raises(self, tmp_path):
+        toml_path = tmp_path / "bad.toml"
+        toml_path.write_text('[measurement]\nprecision = -1\n', encoding="utf-8")
+        with pytest.raises(ValueError, match="precision must be"):
+            SLMConfig.from_toml(toml_path)
+
     def test_file_created(self, tmp_path):
         config = SLMConfig(metrics=["LAeq"], dt=1.0, output="out")
         toml_path = tmp_path / "sub" / "config.toml"
@@ -1105,6 +1122,47 @@ class TestCLIArgParsingDisplay:
 
 
 # ---------------------------------------------------------------------------
+# CLI arg parsing — --precision flag
+# ---------------------------------------------------------------------------
+
+class TestCLIArgParsingPrecision:
+
+    def _parser(self):
+        from slm.app.__main__ import _build_parser
+        return _build_parser()
+
+    def test_precision_default_is_none(self):
+        """No --precision leaves the config default (1) in force."""
+        args = self._parser().parse_args(["--file", "f.wav", "--measure", "LAeq"])
+        assert args.precision is None
+
+    def test_precision_flag_parses(self):
+        args = self._parser().parse_args(
+            ["--file", "f.wav", "--measure", "LAeq", "--precision", "3"]
+        )
+        assert args.precision == 3
+
+    def test_negative_precision_rejected(self):
+        from slm.app.__main__ import main
+        import sys
+        argv = ["slm", "--generator", "--measure", "LAeq", "--sensitivity-mv", "50",
+                "--precision", "-1"]
+        with patch.object(sys, "argv", argv), pytest.raises(SystemExit):
+            main()
+
+    def test_precision_reaches_config(self, tmp_path):
+        """main() one-shot run puts --precision onto the SLMConfig it builds."""
+        from slm.app.__main__ import main
+        import sys
+        argv = ["slm", "--generator", "--measure", "LAeq", "--sensitivity-mv", "50",
+                "--precision", "2", "--output", str(tmp_path / "r")]
+        with patch("slm.app.cli.run_noise_measurement") as m, \
+                patch.object(sys, "argv", argv):
+            main()
+        assert m.call_args.args[1].precision == 2
+
+
+# ---------------------------------------------------------------------------
 # CLI arg parsing — --samplerate / --blocksize
 # ---------------------------------------------------------------------------
 
@@ -1207,3 +1265,83 @@ class TestSLMShellBlocksize:
             shell.do_start("")
         assert m.call_args.kwargs["samplerate"] == 44100
         assert m.call_args.kwargs["blocksize"] == 4096
+
+
+class TestSLMShellPrecision:
+    """SLMShell `precision` command."""
+
+    def test_default_is_one(self):
+        assert SLMShell()._config.precision == 1
+
+    def test_no_arg_shows_current(self, capsys):
+        shell = SLMShell()
+        shell.do_precision("")
+        assert "1" in capsys.readouterr().out
+
+    def test_sets_value(self, capsys):
+        shell = SLMShell()
+        shell.do_precision("3")
+        capsys.readouterr()
+        assert shell._config.precision == 3
+
+    def test_negative_rejected(self, capsys):
+        shell = SLMShell()
+        shell.do_precision("-1")
+        assert "Invalid" in capsys.readouterr().out
+        assert shell._config.precision == 1
+
+    def test_text_rejected(self, capsys):
+        shell = SLMShell()
+        shell.do_precision("two")
+        assert "Invalid" in capsys.readouterr().out
+
+    def test_show_includes_precision(self, capsys):
+        shell = SLMShell()
+        shell._config.precision = 2
+        shell.do_show("")
+        out = capsys.readouterr().out
+        assert "Precision" in out and "2" in out
+
+
+class TestFormatReport:
+    """slm.io.display.format_report renders the final report block."""
+
+    def test_broadband_only(self):
+        from slm.io.display import format_report
+        from slm.io.results import MeasurementResults
+        results = MeasurementResults(report={"LAeq": 64.6, "LCeq": 68.12})
+        out = format_report(results, precision=1)
+        assert "Report" in out
+        assert "LAeq" in out and "64.6 dB" in out
+        assert "LCeq" in out and "68.1 dB" in out
+
+    def test_includes_rta_bands(self):
+        from slm.io.display import format_report
+        from slm.io.results import MeasurementResults
+        results = MeasurementResults(
+            report={"LZeq": 94.0},
+            rta_report={"LZeq:bands:63-8000": np.array([19.6, 94.0])},
+            band_frequencies={"LZeq:bands:63-8000": ["63", "1k"]},
+        )
+        out = format_report(results, precision=1)
+        assert "LZeq:bands:63-8000" in out
+        assert "63" in out and "19.6 dB" in out
+        assert "1k" in out and "94.0 dB" in out
+
+    def test_empty_results_returns_blank(self):
+        from slm.io.display import format_report
+        from slm.io.results import MeasurementResults
+        assert format_report(MeasurementResults()) == ""
+
+    def test_printed_to_console_after_run(self, meas_000, tmp_path, capsys):
+        """A console run prints the Report block after the per-dt log."""
+        config = SLMConfig(metrics=["LAeq"], dt=1.0,
+                           output=str(tmp_path / "result"))
+        run_measurement(
+            str(meas_000.wav_path), meas_000.sensitivity, config,
+            print_to_console=True,
+        )
+        out = capsys.readouterr().out
+        assert "--- Report" in out
+        # The Report block comes after the last per-dt log line.
+        assert out.index("--- Report") > out.rindex("LAeq:")

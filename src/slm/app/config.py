@@ -33,6 +33,9 @@ class SLMConfig:
     output: str = "output/measurement"
     warmup: float = 0.0
     queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE
+    precision: int = 1
+    """Decimal places used for the console output and CSV result files. One
+    decimal place gives 0.1 dB resolution, matching a Class-1 SLM display."""
     signal_conditioning: str | None = None
     """Signal-conditioning filter to insert in front of every frequency weighting:
     a preset name (e.g. ``"xl2"``) or a custom ``"F_HPF N_HPF F_LPF N_LPF"``
@@ -58,7 +61,8 @@ class SLMConfig:
 
         meas = data.get("measurement", {})
         unknown_meas = set(meas.keys()) - {
-            "dt", "output", "warmup", "queue_maxsize", "signal_conditioning"
+            "dt", "output", "warmup", "queue_maxsize", "precision",
+            "signal_conditioning"
         }
         if unknown_meas:
             raise ValueError(f"Unknown keys in [measurement]: {unknown_meas}")
@@ -86,6 +90,10 @@ class SLMConfig:
         if warmup < 0:
             raise ValueError(f"[measurement] warmup must be non-negative, got {warmup}")
 
+        precision = int(meas.get("precision", 1))
+        if precision < 0:
+            raise ValueError(f"[measurement] precision must be >= 0, got {precision}")
+
         conditioning = _normalize_signal_conditioning(meas.get("signal_conditioning"))
 
         return cls(
@@ -94,6 +102,7 @@ class SLMConfig:
             output=str(meas.get("output", "output/measurement")),
             warmup=warmup,
             queue_maxsize=queue_maxsize,
+            precision=precision,
             signal_conditioning=conditioning,
         )
 
@@ -118,6 +127,7 @@ class SLMConfig:
             f'output        = "{self.output}"\n'
             f"warmup        = {self.warmup}\n"
             f"queue_maxsize = {self.queue_maxsize}\n"
+            f"precision     = {self.precision}\n"
             f"{conditioning_line}"
             "\n"
             "[metrics]\n"
@@ -133,8 +143,9 @@ class SLMConfig:
     def from_args(cls, metrics: list[str], dt: float, output: str,
                   queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
                   warmup: float = 0.0,
+                  precision: int = 1,
                   signal_conditioning: str | None = None) -> "SLMConfig":
         """Construct from parsed command-line arguments."""
         return cls(metrics=list(metrics), dt=dt, output=output,
-                   queue_maxsize=queue_maxsize, warmup=warmup,
+                   queue_maxsize=queue_maxsize, warmup=warmup, precision=precision,
                    signal_conditioning=_normalize_signal_conditioning(signal_conditioning))

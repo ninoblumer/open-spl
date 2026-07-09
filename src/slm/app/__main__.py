@@ -93,6 +93,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Logging interval in seconds (default: 1.0)",
     )
     parser.add_argument(
+        "--precision", type=int, default=None, metavar="N",
+        help="Decimal places for reported/displayed levels (default: 1, i.e. 0.1 "
+             "dB resolution). Applies to the console output and the CSV result files.",
+    )
+    parser.add_argument(
         "--duration", default=None, metavar="HH:MM:SS",
         help="Fixed measurement length as hh:mm:ss, mm:ss, or ss (fields may be "
              "fractional). Stops automatically on the next block edge. Default: "
@@ -198,6 +203,9 @@ def main() -> None:
     if args.blocksize < 1:
         parser.error("--blocksize must be a positive integer")
 
+    if args.precision is not None and args.precision < 0:
+        parser.error("--precision must be a non-negative integer")
+
     # Canonicalize --signal-conditioning (list of tokens) to a single config value.
     if args.signal_conditioning is not None:
         try:
@@ -248,6 +256,8 @@ def main() -> None:
                 config.warmup = args.warmup
             if args.queue_maxsize is not None:
                 config.queue_maxsize = args.queue_maxsize
+            if args.precision is not None:
+                config.precision = args.precision
             if args.signal_conditioning is not None:
                 config.signal_conditioning = args.signal_conditioning
         else:
@@ -257,6 +267,7 @@ def main() -> None:
                 output=args.output if args.output is not None else "output/measurement",
                 queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else DEFAULT_QUEUE_MAXSIZE,
                 warmup=args.warmup if args.warmup is not None else 0.0,
+                precision=args.precision if args.precision is not None else 1,
                 signal_conditioning=args.signal_conditioning,
             )
 
@@ -325,6 +336,8 @@ def main() -> None:
             config.warmup = args.warmup
         if args.queue_maxsize is not None:
             config.queue_maxsize = args.queue_maxsize
+        if args.precision is not None:
+            config.precision = args.precision
         if args.signal_conditioning is not None:
             config.signal_conditioning = args.signal_conditioning
     else:
@@ -339,6 +352,7 @@ def main() -> None:
             output=args.output if args.output is not None else "output/measurement",
             queue_maxsize=args.queue_maxsize if args.queue_maxsize is not None else DEFAULT_QUEUE_MAXSIZE,
             warmup=args.warmup if args.warmup is not None else 0.0,
+            precision=args.precision if args.precision is not None else 1,
             signal_conditioning=args.signal_conditioning,
         )
 

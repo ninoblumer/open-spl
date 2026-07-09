@@ -10,6 +10,37 @@ from slm.io.reporter import _fmt_timestamp
 
 if TYPE_CHECKING:
     from slm.io.controller import Controller
+    from slm.io.results import MeasurementResults
+
+
+def format_report(results: "MeasurementResults", precision: int = 1) -> str:
+    """Format the final measurement report as a printable multi-line string.
+
+    Renders the overall broadband values (:attr:`MeasurementResults.report`) and,
+    below them, each band-split (RTA) metric (:attr:`MeasurementResults.rta_report`)
+    as a per-band list.  Returns ``""`` when there is nothing to report.
+    """
+    fmt = f"{{:.{precision}f}}"
+    lines: list[str] = []
+
+    if results.report:
+        label_w = max(len(label) for label in results.report)
+        for label, value in results.report.items():
+            lines.append(f"  {label:<{label_w}}  {fmt.format(value)} dB")
+
+    for label, arr in results.rta_report.items():
+        freqs = results.band_frequencies.get(label, [])
+        if lines:
+            lines.append("")
+        lines.append(f"  {label}  (bands)")
+        for freq, value in zip(freqs, arr):
+            lines.append(f"    {str(freq):>7}  {fmt.format(value)} dB")
+
+    if not lines:
+        return ""
+
+    header = "--- Report " + "-" * 30
+    return "\n".join([header, *lines])
 
 
 def make_display_fn(mode: str, db_min: float = 40.0, db_max: float = 120.0,

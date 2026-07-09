@@ -433,13 +433,17 @@ TOLERANCE_DB = 0.18
 class TestAssemblyNumerical:
 
     def _run(self, meas, metric_names, blocksize=1024):
-        """Build chain via assembly, run, return final report row as dict."""
+        """Build chain via assembly, run, return final report row as dict.
+
+        Reports at 2 dp (finer than the 0.1 dB product default) so report rounding
+        does not eat into the ``TOLERANCE_DB`` accuracy budget.
+        """
         from slm.app.config import SLMConfig
         from slm.app.cli import run_measurement
 
         with tempfile.TemporaryDirectory() as td:
             out = str(Path(td) / "result")
-            config = SLMConfig(metrics=metric_names, dt=1.0, output=out)
+            config = SLMConfig(metrics=metric_names, dt=1.0, output=out, precision=2)
             run_measurement(
                 str(meas.wav_path), meas.sensitivity, config,
                 print_to_console=False, blocksize=blocksize,
